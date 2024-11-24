@@ -6,17 +6,31 @@
 #include <iostream>
 #include <iomanip> // For formatting
 
-#define TAKEN 0
-#define NOT_TAKEN 1
+#define TAKEN		0	// Branch taken
+#define NOT_TAKEN	1	// Branch not taken
 
-#define NUM_COMPONENTS 4 // Number of TAGE components
-#define BASE_BITS 15 // Base predictor bits
-#define TAG_BITS 10 // Number of bits for tags
-#define PRED_BITS 3 // Predictor counter bits
-#define U_BITS 2 // Utility counter bits
+#define BIMODAL_PRED_SIZE	13	// Number of rows in the bimodel table
+#define BIMODAL_PRED_MAX	3	// 2 bit predictor maxsize
+#define BIMODAL_PRED_INIT	2	// Weakly taken, 0b10 out of {00, 01, 10, 11}
 
-// PARAMETER 1
-unsigned int tage_hist_lengths[NUM_COMPONENTS] = {1, 2, 4, 8};
+#define NUM_TAGE_COMPONENTS 4	// Total amount of TAGE components
+#define TAGE_PRED_MAX		7	// 3 bit predictor
+#define TAGE_U_MAX			3	// 2 bit useful counter
+
+#define WEAKLY_TAKEN		4	// 0b100 out of {000, 001, ..., 110, 111} 
+#define WEAKLY_NOT_TAKEN	3	// 0b101 out of {000, 001, ..., 110, 111} 
+
+#define ALTPRED_BETTER_MAX	15
+#define ALTPRED_BETTER_INIT	8
+
+#define GLOBAL_HISTORY_LENGTH	100
+#define PATH_HISTORY_LENGTH		16
+
+#define CLOCK_MAX	20
+
+const uint32_t HIST_LENGTHS[] = {2, 3, 8, 12, 17, 33, 35, 67, 97, 138, 195, 330, 517, 1193, 1741, 1930};
+const uint32_t TAGE_TABLE_SIZE[] = {9,9,10,10,10,10,11,11,11,11,12,12,11,11,10,10};
+const uint32_t TAGE_TAG_SIZE[] = {16, 15, 14, 14, 13, 13, 12, 12, 11, 10, 9, 9, 9, 8, 8, 7};
 
 // Print function for branch_info
 void print_branch_info(const branch_info &b) {
@@ -24,10 +38,14 @@ void print_branch_info(const branch_info &b) {
     std::cout << "Opcode: " << b.opcode << std::endl << std::endl;
 }
 
+struct bimodalEntry{
+    unsigned int pred;	// 2 bit saturating counter
+};
+
 struct tageEntry {
-	unsigned int pred;	// 3b saturating counter
+	unsigned int pred;	// 3 bit saturating counter
 	unsigned int tag;	// Tag for associativity
-	unsigned int u;		// 2b usefulness counter
+	unsigned int u;		// 2 bit usefulness counter
 
 	void reset() {
 		pred = 0;
@@ -43,19 +61,51 @@ public:
 
 class my_predictor : public branch_predictor {
 public:
-	#define HISTORY_LENGTH	15
-	#define TABLE_BITS	15
+	// #define HISTORY_LENGTH	15
+	// #define TABLE_BITS	15
 
 	my_update u;
     branch_info bi;
-    unsigned int history; 							// Global history register
-    unsigned char base_predictor[1 << BASE_BITS];	// Base predictor
-    tageEntry tage[NUM_COMPONENTS][1 << TABLE_BITS]; // TAGE components
 
-    my_predictor() : history(0) {
-        memset(base_predictor, 0, sizeof(base_predictor));
-        for (int i = 0; i < NUM_COMPONENTS; i++) {
-            memset(tage[i], 0, sizeof(tage[i]));
+    unsigned int globalHistory;
+	unsigned int pathHistory; 						// Global history register
+    
+    tageEntry **tagePredictor; // TAGE components
+	bimodalEntry *bimodal;                // Bimodal Table
+
+	// Track predictions
+	bool providerPred;       
+	bool altPred;
+	int tableOfPred;
+	int altTableOfPred;
+	uint32_t indexPred;
+	uint32_t altIndexPred;
+	int32_t	altBetterCount;
+	uint8_t predDir;
+
+    my_predictor() : 
+		globalHistory(0), 
+		pathHistory(0),
+		providerPred(0),       
+		altPred(0),
+		tableOfPred(NUM_TAGE_COMPONENTS),
+		altTableOfPred(NUM_TAGE_COMPONENTS),
+		altBetterCount(ALTPRED_BETTER_INIT) {
+
+        // Initialize the default Bimodal Predictor
+		uint32_t numBimodalEntries = (1 << BIMODAL_PRED_SIZE);
+		bimodal = new bimodalEntry[numBimodalEntries];
+		for (uint32_t i = 0; i < numBimodalEntries; i++)
+			bimodal[i].pred = BIMODAL_PRED_INIT;
+
+		// Initialize the TAGE predictor
+		tagePredictor = new tageEntry*[NUM_TAGE_COMPONENTS];
+        for (int i = 0; i < NUM_TAGE_COMPONENTS; i++) {
+			uint32_t tableSize = (1 << TAGE_TABLE_SIZE[i]);
+			
+			tagePredictor[i] = new tageEntry[tableSize];
+			for (uint32_t j = 0; j < tableSize; j++)
+				tagePredictor[i][j].reset();
         }
     }
 
