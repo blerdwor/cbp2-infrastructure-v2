@@ -29,7 +29,8 @@
 #define CLOCK_MAX         20    // Number of cycles before reset/flush -> 2^20 cycles
 
 // Our parameters tuned to a local optimum
-const uint32_t HIST[] = {2, 3, 8, 12, 17, 33, 35, 67, 97, 138, 195, 330, 517, 1193, 1741, 1930};
+// const uint32_t HIST[] = {2, 3, 8, 12, 17, 33, 35, 67, 97, 138, 195, 330, 517, 1193, 1741, 1930};
+const uint32_t HIST[] = {1930, 1741, 1193, 517, 330, 195, 138, 97, 67, 35, 33, 17, 12, 8, 3, 2};
 const uint32_t TAGE_TABLE_SIZE[] = {9,9,10,10,10,10,11,11,11,11,12,12,11,11,10,10};
 const uint32_t TAGE_TAG_SIZE[] = {16, 15, 14, 14, 13, 13, 12, 12, 11, 10, 9, 9, 9, 8, 8, 7};
 
@@ -79,7 +80,6 @@ uint32_t numBimodalEntries;         // Number of Entries in Bimodal Table
 //#############################################################################
 tagVal_t **tagTables;               // TAGE Tables
 uint32_t *tageTableSize;            // Size of each TAGE Table
-uint32_t *tageTagSize;              // Tag size of each TAGE Table
 uint32_t *tageHistory;              // History length of each TAGE Table
 //#############################################################################
     
@@ -124,29 +124,17 @@ public:
 
     my_predictor() {
         GHR = new std::bitset<1001>;
-
-        // Init the Table size from the Global array
-        tageTableSize = new uint32_t[NUM_TAGE_TABLES];
-        std::copy(std::begin(TAGE_TABLE_SIZE), std::end(TAGE_TABLE_SIZE), tageTableSize);
-
-        // Init the Tag sizes from the Global array   
-        tageTagSize = new uint32_t[NUM_TAGE_TABLES];
-        std::copy(std::begin(TAGE_TAG_SIZE), std::end(TAGE_TAG_SIZE), tageTagSize);
     
         // Tables to stores the entries of the TAGE Tables
         tagTables = new tagVal_t*[NUM_TAGE_TABLES];
         for(uint32_t i = 0; i < NUM_TAGE_TABLES; i++) {
-            uint32_t tableSize = (1<<tageTableSize[i]);
+            uint32_t tableSize = (1<<TAGE_TABLE_SIZE[i]);
 
             tagTables[i] = new tagVal_t[tableSize];
             for(uint32_t j =0; j < tableSize; j++)
                 tagTables[i][j].reset();     
         }
 
-        tageHistory = new uint32_t[NUM_TAGE_TABLES];    // Array to store the hisory length of each Table
-        for (size_t i = 0; i < NUM_TAGE_TABLES; i++)
-            tageHistory[i] = HIST[NUM_TAGE_TABLES-1-i]; // Copy history length from the Global Array
-        
         tageIndex = new uint32_t[NUM_TAGE_TABLES];      // Indexing array for TAGE Tables
         for(uint32_t i=0; i < NUM_TAGE_TABLES; i++)   
             tageIndex[i] = 0;
@@ -170,16 +158,16 @@ public:
         // Init the CSR 
         for(uint32_t i = 0; i<NUM_TAGE_TABLES; i++){
             csrIndex[i].val = 0;
-            csrIndex[i].oldlen = tageHistory[i];
-            csrIndex[i].newlen = tageTagSize[i];
+            csrIndex[i].oldlen = HIST[i];
+            csrIndex[i].newlen = TAGE_TAG_SIZE[i];
 
             csrTag[0][i].val = 0;
-            csrTag[0][i].oldlen = tageHistory[i];
-            csrTag[0][i].newlen = tageTagSize[i];
+            csrTag[0][i].oldlen = HIST[i];
+            csrTag[0][i].newlen = TAGE_TAG_SIZE[i];
 
             csrTag[1][i].val = 0;
-            csrTag[1][i].oldlen = tageHistory[i];
-            csrTag[1][i].newlen = tageTagSize[i]-1;
+            csrTag[1][i].oldlen = HIST[i];
+            csrTag[1][i].newlen = TAGE_TAG_SIZE[i]-1;
         }
     
         // Init the Global Prediction Counters
@@ -205,12 +193,11 @@ public:
 
             // Get TAGE Tags
             for(int i = 0; i < NUM_TAGE_TABLES; i++)
-                tageTag[i] = (b.address ^ csrTag[0][i].val ^ (csrTag[1][i].val << 1)) & ((1 << tageTagSize[i]) -1);
+                tageTag[i] = (b.address ^ csrTag[0][i].val ^ (csrTag[1][i].val << 1)) & ((1 << TAGE_TAG_SIZE[i]) -1);
 
             // Get TAGE Indices
-            uint32_t offset[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} ;
             for(int i = 0; i < NUM_TAGE_TABLES; i++) 
-                tageIndex[i] = (b.address ^ (b.address >> tageTableSize[i]) ^ csrIndex[i].val ^ PHR ^ (PHR & ((1<<offset[i])-1))) & ((1 << tageTableSize[i])-1);
+                tageIndex[i] = (b.address ^ (b.address >> TAGE_TABLE_SIZE[i]) ^ csrIndex[i].val ^ PHR) & ((1 << TAGE_TABLE_SIZE[i])-1);
 
             // Prepare for TAGE prediction
             pred_pred = -1;
@@ -365,7 +352,7 @@ public:
             clockState = 1 - clockState;               
             
             for(uint32_t i = 0; i < NUM_TAGE_TABLES; i++)
-                for(uint32_t j = 0; j < (1<<tageTableSize[i]); j++)
+                for(uint32_t j = 0; j < (1<<TAGE_TABLE_SIZE[i]); j++)
                     tagTables[i][j].u &= (clockState+1);  // If clockstate=0, reset lower bit else upper bit
         }
         
