@@ -4,8 +4,9 @@
 class branch_update {
 	bool _direction_prediction;
 	unsigned int _target_prediction;
+	
 
-public:
+public:	
 	bool direction_prediction () { return _direction_prediction; }
 	void direction_prediction (bool b) { _direction_prediction = b; }
 

@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <time.h>
 #include <fstream>
+#include <cstdint>
 
 #define TAKEN 			  1 	// Branch Taken True
 #define NOT_TAKEN 		  0		// Branch Taken False
@@ -19,7 +20,8 @@
 #define WEAKLY_TAKEN      4   	// 100 out of {000,...,111} [Weakly Taken for TAGE]
 #define WEAKLY_NOT_TAKEN  3		// 011 out of {000,...,111} [Weakly Not Taken for TAGE]
 
-#define NUM_TAGE_TABLES   16  	// Number of TAGE tables
+// #define NUM_TAGE_TABLES   16  	// Number of TAGE tables
+#define NUM_TAGE_TABLES   4  	// Number of TAGE tables
 
 #define ALTPRED_BET_MAX   15    // Alternate Prediction cap of 4 bits
 #define ALTPRED_BET_INIT  8     // Init at 1000 out of {0000,...,1111} [Weakly Taken]
@@ -28,11 +30,11 @@
 
 #define CLOCK_MAX         20    // Number of cycles before reset/flush -> 2^20 cycles
 
-// Our parameters tuned to a local optimum
 // const uint32_t HIST[] = {2, 3, 8, 12, 17, 33, 35, 67, 97, 138, 195, 330, 517, 1193, 1741, 1930};
-const uint32_t HIST[] = {1930, 1741, 1193, 517, 330, 195, 138, 97, 67, 35, 33, 17, 12, 8, 3, 2};
-const uint32_t TAGE_TABLE_SIZE[] = {9,9,10,10,10,10,11,11,11,11,12,12,11,11,10,10};
-const uint32_t TAGE_TAG_SIZE[] = {16, 15, 14, 14, 13, 13, 12, 12, 11, 10, 9, 9, 9, 8, 8, 7};
+// const uint32_t HIST[] = {1930, 1741, 1193, 517, 330, 195, 138, 97, 67, 35, 33, 17, 12, 8, 3, 2};
+const uint32_t HIST[] = {512,300,20,4};
+const uint32_t TAGE_TABLE_SIZE[] = {10,20,24,30};
+const uint32_t TAGE_TAG_SIZE[] = {8, 20, 16, 15};
 
 //#############################################################################
 // For folding overflow
@@ -68,7 +70,7 @@ void tagVal_t::reset() {
 //#############################################################################
 
 //#############################################################################
-std::bitset<1001> *GHR;                  // Global History Register       
+std::bitset<1001> *GHR;             // Global History Register       
 uint32_t PHR;                       // Path History Register 
 //#############################################################################
 
@@ -88,7 +90,7 @@ CircularShiftRegister_t *csrIndex;  // Circular Shift Register for indexing
 CircularShiftRegister_t **csrTag;   // Circular Shift Registers for tags [2 of them]
 //#############################################################################
 
-//#~ Variables to Track all Prediction quantities ~############################
+// Variables to Track all Prediction quantities ############################
 bool pred_pred;       
 bool altPred_pred;
 int table_pred;
@@ -175,7 +177,6 @@ public:
         altPred_pred = -1;
         table_pred = NUM_TAGE_TABLES;
         altTable_pred = NUM_TAGE_TABLES;
-        //~
         
         // Init the clock and clock state
         clockk = 0;
@@ -346,15 +347,15 @@ public:
             }  
         }
         
-        clockk++;                           // Add cycle
-        if(clockk == (1<<CLOCK_MAX)) { 	    // Reset after every 2^CLOCK_MAX cycles
-            clockk = 0;   
-            clockState = 1 - clockState;               
+        // clockk++;                           // Add cycle
+        // if(clockk == (1<<CLOCK_MAX)) { 	    // Reset after every 2^CLOCK_MAX cycles
+        //     clockk = 0;   
+        //     clockState = 1 - clockState;               
             
-            for(uint32_t i = 0; i < NUM_TAGE_TABLES; i++)
-                for(uint32_t j = 0; j < (1<<TAGE_TABLE_SIZE[i]); j++)
-                    tagTables[i][j].u &= (clockState+1);  // If clockstate=0, reset lower bit else upper bit
-        }
+        //     for(uint32_t i = 0; i < NUM_TAGE_TABLES; i++)
+        //         for(uint32_t j = 0; j < (1<<TAGE_TABLE_SIZE[i]); j++)
+        //             tagTables[i][j].u &= (clockState+1);  // If clockstate=0, reset lower bit else upper bit
+        // }
         
         *GHR = (*GHR << 1); // Shift GHR
         if(taken == TAKEN)

@@ -9,6 +9,8 @@
 #include <string.h> // in case you want to use e.g. memset
 #include <assert.h>
 #include <math.h>
+#include <iostream>
+#include <fstream>
 
 #include "branch.h"
 #include "trace.h"
@@ -17,8 +19,9 @@
 
 int main (int argc, char *argv[]) {
 
-	// make sure there is one parameter
+	// std::ofstream logfile("logfile.txt", std::ios::app);
 
+	// make sure there is one parameter
 	if (argc != 2) {
 		fprintf (stderr, "Usage: %s <filename>.gz\n", argv[0]);
 		exit (1);
@@ -65,12 +68,18 @@ int main (int argc, char *argv[]) {
 			// count a target misprediction
 
 			tmiss += u->target_prediction () != t->target;
+
+			// if (logfile.is_open()) {
+			// 	logfile << t->bi.address << " " << t->taken << " " << u->direction_prediction () << "\n";
+			// }
 		}
 
 		// update competitor's state
 
 		p->update (u, t->taken, t->target);
 	}
+
+	// logfile.close();
 
 	// done reading traces
 
