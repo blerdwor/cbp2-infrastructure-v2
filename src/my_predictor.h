@@ -1,119 +1,60 @@
-//Predictor 3
-
-#include <bitset>
-#include <cstdlib>
-#include <time.h>
-#include <fstream>
 #include <cstdint>
+#include <bitset>
+#include <algorithm>
 
-#define TAKEN 			  1 	// Branch Taken True
-#define NOT_TAKEN 		  0		// Branch Taken False
+#define INT32  int32_t
+#define UINT32 uint32_t
 
-#define BIMODAL_SIZE      13  	// Number of rows in Bimodal Table
+#define TAKEN 			  true
+#define NOT_TAKEN 		  false	
 
-#define BIMODAL_PRED_MAX  3   	// 2 bit prediction Bimodal
-#define TAGE_PRED_MAX     7   	// 3 bit prediction TAGE
-#define PRED_U_MAX        3   	// 2 useful bit counter
+#define BIMODAL_CTR_MAX		3
+#define BIMODAL_CTR_INIT	2
+#define TAGPRED_CTR_MAX		7
+#define TAGPRED_CTR_INIT	0
+#define BIMODALLOG   		14 // 2^14 entries in base predictor
+#define NUMTAGTABLES 		4
+#define TAGPREDLOG			12 // 2^12 entries in tage table
+// TODO change variables names
 
-#define BIMODAL_PRED_INIT 2   	// choose 10 out of {00, 01, 10, 11} [Weakly Taken]
+// Entry in a TAGE compoenent
+struct TagEntry 
+{
+    INT32 ctr;
+    UINT32 tag;
+    INT32 usefulBits; // TODO: change to useful bit
+};
 
-#define WEAKLY_TAKEN      4   	// 100 out of {000,...,111} [Weakly Taken for TAGE]
-#define WEAKLY_NOT_TAKEN  3		// 011 out of {000,...,111} [Weakly Not Taken for TAGE]
+// Folded History implementation ... from GHR(geometric length) -> compressed(target)
+struct CompressedHist
+{
+	// Objective is to convert geomLength of GHR into tagPredLog which is of length 
+	// equal to the index of the corresponding bank
+    // It can be also used for tag when the final length would be the Tag
+    UINT32 geomLength;
+    UINT32 targetLength;
+    UINT32 compHist;
+      
+    void updateCompHist(std::bitset<131> ghr)
+    {
+        int mask = (1 << targetLength) - 1;
+        int mask1 = ghr[geomLength] << (geomLength % targetLength);
+        int mask2 = (1 << targetLength);
+            compHist  = (compHist << 1) + ghr[0];
+            compHist ^= ((compHist & mask2) >> targetLength);
+            compHist ^= mask1;
+            compHist &= mask;  
+         
+    }    
+};
 
-// #define NUM_TAGE_TABLES   16  	// Number of TAGE tables
-#define NUM_TAGE_TABLES   4  	// Number of TAGE tables
-
-#define ALTPRED_BET_MAX   15    // Alternate Prediction cap of 4 bits
-#define ALTPRED_BET_INIT  8     // Init at 1000 out of {0000,...,1111} [Weakly Taken]
-
-#define PHR_LEN           16    // Length of Path History Register
-
-#define CLOCK_MAX         20    // Number of cycles before reset/flush -> 2^20 cycles
-
-// const uint32_t HIST[] = {2, 3, 8, 12, 17, 33, 35, 67, 97, 138, 195, 330, 517, 1193, 1741, 1930};
-// const uint32_t HIST[] = {1930, 1741, 1193, 517, 330, 195, 138, 97, 67, 35, 33, 17, 12, 8, 3, 2};
-const uint32_t HIST[] = {512,300,20,4};
-const uint32_t TAGE_TABLE_SIZE[] = {10,20,24,30};
-const uint32_t TAGE_TAG_SIZE[] = {8, 20, 16, 15};
-
-//#############################################################################
-// For folding overflow
-typedef struct CircularShiftRegister { 
-    uint16_t val;
-    uint16_t oldlen;
-    uint16_t newlen;
-} CircularShiftRegister_t;
-//#############################################################################
-
-//#############################################################################
-// 2 prediction bits
-typedef struct bimodVal{
-    uint32_t pred;  
-} bimodVal_t;
-//#############################################################################
-
-//#############################################################################
-// Entries of TAGE Table
-typedef struct tagVal {
-    uint16_t pred;
-    uint16_t tag;
-    uint16_t u;
-
-    void reset();
-} tagVal_t;
-
-void tagVal_t::reset() {
-    pred = 0;
-    tag = 0;
-    u = 0;
+int satIncrement(UINT32 value, UINT32 max) {
+    return (value < max) ? value + 1 : value;
 }
-//#############################################################################
 
-//#############################################################################
-std::bitset<1001> *GHR;             // Global History Register       
-uint32_t PHR;                       // Path History Register 
-//#############################################################################
-
-//#############################################################################
-bimodVal_t *bimodal;                // Bimodal Table
-uint32_t numBimodalEntries;         // Number of Entries in Bimodal Table
-//#############################################################################
-
-//#############################################################################
-tagVal_t **tagTables;               // TAGE Tables
-uint32_t *tageTableSize;            // Size of each TAGE Table
-uint32_t *tageHistory;              // History length of each TAGE Table
-//#############################################################################
-    
-//#############################################################################
-CircularShiftRegister_t *csrIndex;  // Circular Shift Register for indexing
-CircularShiftRegister_t **csrTag;   // Circular Shift Registers for tags [2 of them]
-//#############################################################################
-
-// Variables to Track all Prediction quantities ############################
-bool pred_pred;       
-bool altPred_pred;
-int table_pred;
-int altTable_pred;
-uint32_t bimodalIndex;
-uint32_t index_pred;
-uint32_t altIndex_pred;
-//#############################################################################
-    
-//#############################################################################
-uint32_t *tageIndex;                // Indices for all tables
-uint32_t *tageTag;                  // Tags for all tables
-//#############################################################################
-
-//#############################################################################
-uint32_t clockk;                    // Clock to count cycles for reset/flush      
-bool clockState;                    // Reset state
-//#############################################################################
-
-//#############################################################################
-int32_t altBetterCount;             // Number of times Alternate was better
-uint8_t predDir;                    // Direction of pred (Taken or Not-taken?)
-//#############################################################################
+int satDecrement(UINT32 value) {
+    return (value > 0) ? value - 1 : value;
+}
 
 class my_update : public branch_update {
 public:
@@ -121,267 +62,381 @@ public:
 };
 
 class my_predictor : public branch_predictor {
+private:
+	std::bitset<131> GHR;	// global history register
+	int PHR;			// 16 bit path history
+	
+	// Bimodal Base Predictor
+	UINT32  *bimodal;			// pattern history table (pht)
+	UINT32  historyLength;		// history length
+	UINT32  numBimodalEntries;	// entries in pht 
+	UINT32  bimodalLog;
+	
+	//Tagged Predictors
+	TagEntry *tagPred[NUMTAGTABLES];
+	UINT32 numTagPredEntries;
+	UINT32 tagPredLog;
+	UINT32 geometric[NUMTAGTABLES];
+	
+	//Compressed Buffers
+	CompressedHist indexComp[NUMTAGTABLES];
+	CompressedHist tagComp[2][NUMTAGTABLES]; 
+
+	// Predictions need to be global
+	bool primePred;
+	bool altPred;
+	int primeBank;
+	int altBank;
+
+	// Index had to be made global else recalculate for update
+	UINT32 indexTagPred[NUMTAGTABLES];
+	UINT32 tag[NUMTAGTABLES];
+	UINT32 clock;
+	int clock_flip;
+	INT32 altBetterCount;
+
 public:
-    my_update u;
+	my_update u;
+	branch_info bi;
 
-    my_predictor() {
-        GHR = new std::bitset<1001>;
-    
-        // Tables to stores the entries of the TAGE Tables
-        tagTables = new tagVal_t*[NUM_TAGE_TABLES];
-        for(uint32_t i = 0; i < NUM_TAGE_TABLES; i++) {
-            uint32_t tableSize = (1<<TAGE_TABLE_SIZE[i]);
+	my_predictor (void) { 
 
-            tagTables[i] = new tagVal_t[tableSize];
-            for(uint32_t j =0; j < tableSize; j++)
-                tagTables[i][j].reset();     
-        }
+		// Initialize bimodal table (simple 2-bit counter table)
+		// TODO: remove extra calculations(?)
+		bimodalLog = BIMODALLOG;
+		numBimodalEntries = (1 << bimodalLog);
+		bimodal = new UINT32[numBimodalEntries];
 
-        tageIndex = new uint32_t[NUM_TAGE_TABLES];      // Indexing array for TAGE Tables
-        for(uint32_t i=0; i < NUM_TAGE_TABLES; i++)   
-            tageIndex[i] = 0;
-        
-        tageTag = new uint32_t[NUM_TAGE_TABLES];        // Tag array for each TAGE Table
-        for(uint32_t i=0; i < NUM_TAGE_TABLES; i++)
-            tageTag[i] = 0;
-        
-        // Bimodal Inits 
-        numBimodalEntries = (1 << BIMODAL_SIZE);        // Number of entries in the Bimodal Table
-        bimodal = new bimodVal_t[numBimodalEntries];    // Entries of Bimodal table
-        for(uint32_t i=0; i< numBimodalEntries; i++)
-            bimodal[i].pred = BIMODAL_PRED_INIT;        // Init the table to Weakly Taken
+		for(UINT32 i = 0; i < numBimodalEntries; i++)
+			bimodal[i] = BIMODAL_CTR_INIT;
+		
+		// Initialize tagged predictors 
+		tagPredLog = TAGPREDLOG;
+		numTagPredEntries = (1 << tagPredLog);
 
-        // Create Circular Shift Registers for Index and Tags
-        csrIndex = new CircularShiftRegister_t[NUM_TAGE_TABLES];
-        csrTag = new CircularShiftRegister_t*[2];
-        csrTag[0] = new CircularShiftRegister_t[NUM_TAGE_TABLES];
-        csrTag[1] = new CircularShiftRegister_t[NUM_TAGE_TABLES];
+		for(UINT32 i = 0; i < NUMTAGTABLES; i++) {
+			tagPred[i] = new TagEntry[numTagPredEntries];
 
-        // Init the CSR 
-        for(uint32_t i = 0; i<NUM_TAGE_TABLES; i++){
-            csrIndex[i].val = 0;
-            csrIndex[i].oldlen = HIST[i];
-            csrIndex[i].newlen = TAGE_TAG_SIZE[i];
+			for(UINT32 j = 0; j < numTagPredEntries; j++) {
+				tagPred[i][j].ctr = 0;
+				tagPred[i][j].tag = 0;
+				tagPred[i][j].usefulBits = 0;
+			}
+		}
 
-            csrTag[0][i].val = 0;
-            csrTag[0][i].oldlen = HIST[i];
-            csrTag[0][i].newlen = TAGE_TAG_SIZE[i];
+		// Geometric lengths of histry to consider, table 0 is longest
+		geometric[0] = 130;
+		geometric[1] = 44;
+		geometric[2] = 15;
+		geometric[3] = 5;
 
-            csrTag[1][i].val = 0;
-            csrTag[1][i].oldlen = HIST[i];
-            csrTag[1][i].newlen = TAGE_TAG_SIZE[i]-1;
-        }
-    
-        // Init the Global Prediction Counters
-        pred_pred = -1;
-        altPred_pred = -1;
-        table_pred = NUM_TAGE_TABLES;
-        altTable_pred = NUM_TAGE_TABLES;
-        
-        // Init the clock and clock state
-        clockk = 0;
-        clockState = 0;
-        
-        // Init the Path History, Global History and Alternate Better Count (to Weakly Better)
-        PHR = 0;
-        GHR->reset();
-        altBetterCount = ALTPRED_BET_INIT;
+		// Initialize compressed buffers for index of tagged component 
+		for(int i = 0; i < NUMTAGTABLES; i++) {
+			indexComp[i].compHist = 0;
+			indexComp[i].geomLength = geometric[i];
+			indexComp[i].targetLength = TAGPREDLOG;
+		}
+
+		// Initialize compressed buffers for tags
+        // The tables have different tag lengths
+        // T2 and T3 have tag length -> 8
+        // T0 and T1 have tag length -> 9
+        // Second index indicates the Bank no.
+        for(int j = 0; j < 2 ; j++) {
+			// TODO: come back and look at this, read paper again
+        	for(int i = 0; i < NUMTAGTABLES; i++) {
+				tagComp[j][i].compHist = 0;
+				tagComp[j][i].geomLength = geometric[i];
+				if(j == 0) {
+                	tagComp[j][i].targetLength = 9 ;    
+            	} else {
+                	tagComp[j][i].targetLength = 8 ;
+            	}
+        	}   
+    	}
+
+		// Preditions banks and prediction values 
+		primePred = -1;
+		altPred = -1;
+		primeBank = NUMTAGTABLES;
+		altBank = NUMTAGTABLES;
+		
+		for(int i=0; i < NUMTAGTABLES; i++)    
+			indexTagPred[i] = 0;
+
+		for(int i=0; i < NUMTAGTABLES; i++)
+			tag[i] = 0;
+		
+		clock = 0;
+		clock_flip = 1;
+		PHR = 0;
+		GHR.reset();
+		altBetterCount = 8;
 	}
 
-    branch_update *predict(branch_info &b) {
+	branch_update *predict (branch_info & b) {
+		bi = b;
 		if (b.br_flags & BR_CONDITIONAL) {
-			bimodalIndex = (b.address) % (numBimodalEntries); 
+			// Base prediction
+			bool basePrediction;
+			UINT32 bimodalIndex = b.address % numBimodalEntries;
+			UINT32 bimodalCounter = bimodal[bimodalIndex];
 
-            // Get TAGE Tags
-            for(int i = 0; i < NUM_TAGE_TABLES; i++)
-                tageTag[i] = (b.address ^ csrTag[0][i].val ^ (csrTag[1][i].val << 1)) & ((1 << TAGE_TAG_SIZE[i]) -1);
+			basePrediction = (bimodalCounter > BIMODAL_CTR_MAX/2) ? TAKEN : NOT_TAKEN;
 
-            // Get TAGE Indices
-            for(int i = 0; i < NUM_TAGE_TABLES; i++) 
-                tageIndex[i] = (b.address ^ (b.address >> TAGE_TABLE_SIZE[i]) ^ csrIndex[i].val ^ PHR) & ((1 << TAGE_TABLE_SIZE[i])-1);
+			// Hash to get tag includes info about bank, pc and global history compressed
+			// formula given in PPM paper 
+			// pc[9:0] xor CSR1 xor (CSR2 << 1)
+			for (int i = 0; i < NUMTAGTABLES; i++) {
+				tag[i] = b.address ^ tagComp[0][i].compHist ^ (tagComp[1][i].compHist << 1);
+				tag[i] &= ((1 << 9) - 1);
+			}
+			
+			// Get the index for each table
+			indexTagPred[0] = b.address ^ (b.address >> TAGPREDLOG) ^ indexComp[0].compHist ^ PHR ^ (PHR >> TAGPREDLOG);
+       		indexTagPred[1] = b.address ^ (b.address >> (TAGPREDLOG - 1)) ^ indexComp[1].compHist ^ (PHR);
+       		indexTagPred[2] = b.address ^ (b.address >> (TAGPREDLOG - 2)) ^ indexComp[2].compHist ^ (PHR & 31);
+       		indexTagPred[3] = b.address ^ (b.address >> (TAGPREDLOG - 3)) ^ indexComp[3].compHist ^ (PHR & 7);
+			
+			UINT32 index_mask = ((1 << TAGPREDLOG) - 1);
+			for(int i = 0; i < NUMTAGTABLES; i++)
+            	indexTagPred[i] &= index_mask;
+			
+			// Get two predictions prime and alt (alternate)
+			primePred = -1;
+			altPred = -1;
+			primeBank = NUMTAGTABLES;
+			altBank = NUMTAGTABLES;
 
-            // Prepare for TAGE prediction
-            pred_pred = -1;
-            altPred_pred = -1;
-            table_pred = NUM_TAGE_TABLES;
-            altTable_pred = NUM_TAGE_TABLES;
+			// See if any tags match for prime predictor
+			// T0 would be best
+			for(int iterator = 0; iterator < NUMTAGTABLES; iterator++) {
+            	if(tagPred[iterator][indexTagPred[iterator]].tag == tag[iterator]) {
+					primeBank = iterator;
+					break;
+				}  
+       		}      
             
-            // Get the first matching TAGE Table
-            for(uint32_t i = 0; i < NUM_TAGE_TABLES; i++) 
-                if(tagTables[i][tageIndex[i]].tag == tageTag[i]) {  
-                    table_pred = i;
-                    index_pred = tageIndex[i];
+			// See if any tags match for alterante predictor
+			for(int iterator = primeBank + 1; iterator < NUMTAGTABLES; iterator++) {
+                if (tagPred[iterator][indexTagPred[iterator]].tag == tag[iterator]) {
+                    altBank = iterator;
                     break;
                 }  
-            
-            // Check if any other tables with longer history matches the tag
-            for(uint32_t i = table_pred + 1; i < NUM_TAGE_TABLES; i++) {
-                if(tagTables[i][tageIndex[i]].tag == tageTag[i]) {  
-                    altTable_pred = i;
-                    altIndex_pred = tageIndex[i];
-                    break;
-                }
             }
+			
+			
+			if (primeBank < NUMTAGTABLES) { 
+				// Prime predictor tag found
+				  
+				if(altBank == NUMTAGTABLES) {
+					// alt predictor not found 
+					altPred = basePrediction;
+				} else {
+					// alt predictor found 
+					altPred = (tagPred[altBank][indexTagPred[altBank]].ctr >= TAGPRED_CTR_MAX/2) ? TAKEN : NOT_TAKEN;
+					// if(tagPred[altBank][indexTagPred[altBank]].ctr >= TAGPRED_CTR_MAX/2)
+					// 	altPred = TAKEN;
+					// else 
+					// 	altPred = NOT_TAKEN;
+				}
+        
+				if ((tagPred[primeBank][indexTagPred[primeBank]].ctr != 3) || 
+					(tagPred[primeBank][indexTagPred[primeBank]].ctr != 4 ) || 
+					(tagPred[primeBank][indexTagPred[primeBank]].usefulBits != 0) || 
+					(altBetterCount < 8)) {
+						// Prime predictor is not weakly taken or weakly not taken, still useful
 
-            if(table_pred < NUM_TAGE_TABLES) {                  // If table was found
-                if(altTable_pred == NUM_TAGE_TABLES) {          // No alternate table found
-                    altPred_pred = (bimodal[bimodalIndex].pred > BIMODAL_PRED_MAX/2);  
-                } 
-                else {                                          // Alternate table found
-                    if(tagTables[altTable_pred][altIndex_pred].pred >= TAGE_PRED_MAX/2)  
-                            altPred_pred = TAKEN;
-                        else 
-                            altPred_pred = NOT_TAKEN;
-                }
-                
-                if((tagTables[table_pred][index_pred].pred  != WEAKLY_NOT_TAKEN) ||  
-                    (tagTables[table_pred][index_pred].pred != WEAKLY_TAKEN) ||     
-                    (tagTables[table_pred][index_pred].u != 0) ||                     
-                    (altBetterCount < ALTPRED_BET_INIT)) {            // Decide between altPred and Pred                
-                    
-                    pred_pred = tagTables[table_pred][index_pred].pred >= TAGE_PRED_MAX/2;
-                    u.direction_prediction (pred_pred);
-                } 
-                else {
-                    u.direction_prediction (altPred_pred);  
-                }
-            } 
-            else {                                              // If no table found return Bimodal Prediction only
-                altPred_pred = (bimodal[bimodalIndex].pred > BIMODAL_PRED_MAX/2);  
-                u.direction_prediction (altPred_pred); 
-            }
-        }
+						primePred = (tagPred[primeBank][indexTagPred[primeBank]].ctr >= TAGPRED_CTR_MAX/2) ? TAKEN : NOT_TAKEN;
+						// if(tagPred[primeBank][indexTagPred[primeBank]].ctr >= TAGPRED_CTR_MAX/2)
+						// 	primePred = TAKEN;
+						// else 
+						// 	primePred = NOT_TAKEN;
+						u.direction_prediction(primePred);
+				}
+				else {
+					altPred = basePrediction;
+					u.direction_prediction(altPred);
+				}
+			} else {
+				// Prime predictor tag not found, use base predictor 
 
+				altPred = basePrediction;
+				u.direction_prediction(altPred);
+			}
+		} else {
+			u.direction_prediction (true);
+		}
 		u.target_prediction (0);
 		return &u;
-    }
+	}
 
-    void update(branch_update *u, bool taken, unsigned int target) {
-        // uint32_t bimodalIndex = (u.address) % (numBimodalEntries);  
+	// void UpdatePredictor(UINT32 PC (bi), 
+	// bool resolveDir (taken), 
+	// bool predDir (u.direction_prediction ()) );
+	void update (branch_update *u, bool taken, unsigned int target) {
+		if (bi.br_flags & BR_CONDITIONAL) {
+			bool strong_old_present = false;
+			bool new_entry = 0;
 
-        // Update Bimodal Table
-        int predictionVal = -1;
-        int altPredVal = -1;
-        if(table_pred < NUM_TAGE_TABLES) {  
-            
-            predictionVal = tagTables[table_pred][index_pred].pred; 
+			if (primeBank < NUMTAGTABLES) {
+				// had found a prime predictor
 
-            if(taken && predictionVal < TAGE_PRED_MAX)          // If taken and not max
-                ++(tagTables[table_pred][index_pred].pred);     // Increment Counter
-            else if(!taken && predictionVal > 0)                
-                --(tagTables[table_pred][index_pred].pred);  
-            
-            altPredVal = -1;
-            if(altTable_pred != NUM_TAGE_TABLES)                // If alternate prediction present
-                altPredVal = tagTables[altTable_pred][altIndex_pred].pred;
-            
-            if(tagTables[table_pred][index_pred].u == 0 && altPredVal != -1) {
-                if(taken && altPredVal < TAGE_PRED_MAX)
-                    ++(tagTables[altTable_pred][altIndex_pred].pred);
-                else if(!taken && altPredVal > 0)
-                    --(tagTables[altTable_pred][altIndex_pred].pred);
-            } 
-        } 
-        else {  
-            predictionVal = bimodal[bimodalIndex].pred;
-            if(taken && predictionVal < BIMODAL_PRED_MAX)   // If taken and not max
-                ++(bimodal[bimodalIndex].pred);             // Increment prediction counter
-            else if(!taken && predictionVal > 0) 
-                --(bimodal[bimodalIndex].pred);
-        }
-        //~
+				// 1st update the useful counter
+				if (u->direction_prediction () != altPred) {
+					// Prime predictor and alt prediction were different
+
+					if (u->direction_prediction () == taken) { // Correct prediction
+						tagPred[primeBank][indexTagPred[primeBank]].usefulBits = satIncrement(tagPred[primeBank][indexTagPred[primeBank]].usefulBits, static_cast<UINT32>(BIMODAL_CTR_MAX));
+					} else { // Misprediction
+						tagPred[primeBank][indexTagPred[primeBank]].usefulBits = satDecrement(tagPred[primeBank][indexTagPred[primeBank]].usefulBits);
+					}
+				}
+
+				// 2nd update the counters which provided the prediction  
+				if (taken) {
+					tagPred[primeBank][indexTagPred[primeBank]].ctr = satIncrement(tagPred[primeBank][indexTagPred[primeBank]].ctr, static_cast<UINT32>(TAGPRED_CTR_MAX));
+				} else {
+					tagPred[primeBank][indexTagPred[primeBank]].ctr = satDecrement(tagPred[primeBank][indexTagPred[primeBank]].ctr);
+				}
+			} else {
+				// used base prediction as the prime predictor
+				UINT32 bimodalIndex = bi.address % numBimodalEntries;
+				if (taken)
+					bimodal[bimodalIndex] = satIncrement(bimodal[bimodalIndex], static_cast<UINT32>(BIMODAL_CTR_MAX));
+				else
+					bimodal[bimodalIndex] = satDecrement(bimodal[bimodalIndex]);
+			}
+
+			// Check if the current entry that gave the prediction is a newly allocated entry
+			if (primeBank < NUMTAGTABLES) {
+				// Had found a prime predictor
+
+				if ((tagPred[primeBank][indexTagPred[primeBank]].usefulBits == 0) && 
+					((tagPred[primeBank][indexTagPred[primeBank]].ctr == 3) || 
+					 (tagPred[primeBank][indexTagPred[primeBank]].ctr == 4))) {
+						
+					// prime predictor was not useful, and was weakly taken / weakly not taken						
+					new_entry = true;
+					
+					if (primePred != altPred) {
+						
+						// Alternate prediction more useful is a counter to be of 4 bits
+						if (altPred == taken && altBetterCount < 15)		
+							altBetterCount++;
+					} else if (altBetterCount > 0) {
+						altBetterCount--;
+					}
+				}
+			}
+
+			// Allocation of the entry
+			if((!new_entry) || (new_entry && (primePred != taken))) {    
+				if (((u->direction_prediction () != taken) & (primeBank > 0))) {		
+					for (int i = 0; i < primeBank; i++) {
+						// Found at least one entry that is not useful
+
+						// TODO: might need to follow the original
+						if (tagPred[i][indexTagPred[i]].usefulBits == 0)
+							strong_old_present = true;
+					}
+			
+					if (strong_old_present == false) {
+						// If no entry useful than decrease useful bits of all entries 
+						// do not allocate
+						for (int i = primeBank - 1; i >= 0; i--)
+							tagPred[i][indexTagPred[i]].usefulBits--;
+					} else {
+						srand(time(NULL));
+						int randNo = rand() % 100;
+						int count = 0;
+						int bank_store[NUMTAGTABLES - 1] = {-1, -1, -1};
+						int matchBank = 0;
+
+						// Count the number of tables that are useless?
+						for (int i = 0; i < primeBank; i++) {
+							if (tagPred[i][indexTagPred[i]].usefulBits == 0) {
+								count++;
+								bank_store[i] = i;
+							}
+						} 
+
+						// only one useless bank
+						if(count == 1)
+							matchBank = bank_store[0];
+						else if(count > 1) {
+							// more than one useless bank so we need to choose one randomly with 2/3 preference
+							if(randNo > 33 && randNo <= 99)
+								matchBank = bank_store[(count-1)];
+							else
+								matchBank = bank_store[(count-2)];
+						}
+
+						// allocate one entry
+						// start at the matched bank and go to longer histories
+						for (int i = matchBank; i > -1; i--) {
+							if ((tagPred[i][indexTagPred[i]].usefulBits == 0)) {
+								if(taken)   
+									tagPred[i][indexTagPred[i]].ctr = 4;
+								else
+									tagPred[i][indexTagPred[i]].ctr = 3;
+	
+								tagPred[i][indexTagPred[i]].tag = tag[i];
+								tagPred[i][indexTagPred[i]].usefulBits = 0;
+								break;
+							}
+						}
+					}
+				}
+    		}  
+
+			// Periodic Useful bit Reset Logic (Important so as to optimize compared to PPM paper)
+			clock++;
         
-        // Update altBetterCount
-        if(table_pred < NUM_TAGE_TABLES) {                  // Table hit
-            if((tagTables[table_pred][index_pred].u == 0) &&                     
-                ((tagTables[table_pred][index_pred].pred  == WEAKLY_NOT_TAKEN) ||  
-                    (tagTables[table_pred][index_pred].pred  == WEAKLY_TAKEN))) {    // Entry unused and weakly confused            
+			// For every 256 K instruction 1st MSB than LSB
+			if (clock == (256*1024)) {
+            	// reset clock
+            	clock = 0;
+            	
+				clock_flip = (clock_flip == 1) ? 0 : 1;
+				// if (clock_flip == 1)
+                // 	clock_flip = 0;
+				// else
+				// 	clock_flip = 1;
 
-                // Its new in the table
-                if (pred_pred != altPred_pred) {                    // If predictions are different
-                    if (altPred_pred == taken) {                    
-                        if (altBetterCount < ALTPRED_BET_MAX)       // Increment if alternate was correct
-                            altBetterCount++;                    
-                    } 
-                    else if (altBetterCount > 0)                    // Decrement if alternate was wrong
-                        altBetterCount--;                            
-                }
-            }
-        }
-        //~
-        
-        if (((predDir != taken) && (table_pred > 0))) {          // Prediction wrong and no tag hit
-            bool alloc = false;
-            for (int i = 0; i < table_pred; i++) 
-                if (tagTables[i][tageIndex[i]].u == 0)          // Find useful tables
-                    alloc = true;
+	    		if (clock_flip == 1) {// MSB turn
+					for (int jj = 0; jj < NUMTAGTABLES; jj++){    
+						for (UINT32 ii = 0; ii < numTagPredEntries; ii++)
+							tagPred[jj][ii].usefulBits = tagPred[jj][ii].usefulBits & 1;
+					}
+            	} else {// LSB turn
+					for (int jj = 0; jj < NUMTAGTABLES; jj++) {    
+						for (UINT32 ii = 0; ii < numTagPredEntries; ii++)
+							tagPred[jj][ii].usefulBits = tagPred[jj][ii].usefulBits & 2;
+					}
+				}
+			}
+	
+			// update the GHR
+			GHR = (GHR << 1);
 
-            if (!alloc) {                                       // If none
-                for (int i = table_pred - 1; i >= 0; i--)
-                    tagTables[i][tageIndex[i]].u--;             // Decrement usefulness
-            } 
-            else {  
-                for(int i = table_pred-1; i>=0; i--){
-                    if((tagTables[i][tageIndex[i]].u == 0 && !(rand()%10))) {   // Do uniform rejection sampling
-                        if(taken) {  
-                            tagTables[i][tageIndex[i]].pred = WEAKLY_TAKEN; 
-                        } 
-                        else {  
-                            tagTables[i][tageIndex[i]].pred = WEAKLY_NOT_TAKEN;
-                        }    
+			if (taken)
+				GHR.set(0, 1); 
 
-                        tagTables[i][tageIndex[i]].tag = tageTag[i];  // Reset tag
-                        tagTables[i][tageIndex[i]].u = 0;             // Reset usefulness
-                        break; 
-                    }
-                }
-            }
-        }
-        
-        if(table_pred < NUM_TAGE_TABLES) {  // If table hit 
-            if ((predDir != altPred_pred)) {  
-                if (predDir == taken && tagTables[table_pred][index_pred].u < PRED_U_MAX) // altpred not used   
-                    tagTables[table_pred][index_pred].u += 1;  // increment usefulness
-                else if(predDir != taken && tagTables[table_pred][index_pred].u > 0)
-                    tagTables[table_pred][index_pred].u -= 1;  // decrement usefulness
-            }  
-        }
-        
-        // clockk++;                           // Add cycle
-        // if(clockk == (1<<CLOCK_MAX)) { 	    // Reset after every 2^CLOCK_MAX cycles
-        //     clockk = 0;   
-        //     clockState = 1 - clockState;               
-            
-        //     for(uint32_t i = 0; i < NUM_TAGE_TABLES; i++)
-        //         for(uint32_t j = 0; j < (1<<TAGE_TABLE_SIZE[i]); j++)
-        //             tagTables[i][j].u &= (clockState+1);  // If clockstate=0, reset lower bit else upper bit
-        // }
-        
-        *GHR = (*GHR << 1); // Shift GHR
-        if(taken == TAKEN)
-            GHR->set(0,1); 
-        
-        for (int i = 0; i < NUM_TAGE_TABLES; i++) { // Perform folding on Circular Shift Registers
-            csrIndex[i].val = (csrIndex[i].val << 1) + (*GHR)[0];
-            csrIndex[i].val ^= ((csrIndex[i].val & (1 << csrIndex[i].newlen)) >> csrIndex[i].newlen);
-            csrIndex[i].val ^= ((*GHR)[csrIndex[i].oldlen] << (csrIndex[i].oldlen % csrIndex[i].newlen));
-            csrIndex[i].val &= ((1 << csrIndex[i].newlen) -1);
+			for (int i = 0; i < NUMTAGTABLES; i++) {
+				indexComp[i].updateCompHist(GHR);
+				tagComp[0][i].updateCompHist(GHR);
+				tagComp[1][i].updateCompHist(GHR);
+			}
+  
+  			// PHR update is simple, jus take the last bit
+    		// Always Limited to 16 bits as per paper.
+			PHR = (PHR << 1);
 
-            csrTag[0][i].val = (csrTag[0][i].val << 1) + (*GHR)[0];
-            csrTag[0][i].val ^= ((csrTag[0][i].val & (1 << csrTag[0][i].newlen)) >> csrTag[0][i].newlen);
-            csrTag[0][i].val ^= ((*GHR)[csrTag[0][i].oldlen] << (csrTag[0][i].oldlen % csrTag[0][i].newlen));
-            csrTag[0][i].val &= ((1 << csrTag[0][i].newlen) -1);
-
-            csrTag[1][i].val = (csrTag[1][i].val << 1) + (*GHR)[0];
-            csrTag[1][i].val ^= ((csrTag[1][i].val & (1 << csrTag[1][i].newlen)) >> csrTag[1][i].newlen);
-            csrTag[1][i].val ^= ((*GHR)[csrTag[1][i].oldlen] << (csrTag[1][i].oldlen % csrTag[1][i].newlen));
-            csrTag[1][i].val &= ((1 << csrTag[1][i].newlen) -1);
-        }
-        
-        // Update Path History
-        PHR = (PHR << 1);
-        if(target & 1) 
-            PHR = PHR + 1;
-        PHR = (PHR & ((1 << PHR_LEN) - 1));
+			if (bi.address & 1)
+				PHR = PHR + 1;
+			
+			PHR = (PHR & ((1 << 16) - 1));  
+		}
 	}
 };
