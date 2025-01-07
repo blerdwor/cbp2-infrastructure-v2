@@ -9,16 +9,17 @@
 #define NOT_TAKEN	false
 
 #define NUM_TAGE_TABLES 	4	// Total number of TAGE components (tables)
-#define BIMODAL_CTR_MAX		3	// 2bit counter (following paper); 00 ... 11;  
+#define BIMODAL_CTR_MAX		3	// 2bit counter (as per paper); 00 ... 11;  
 #define BIMODAL_CTR_INIT	2	// TODO: Check paper
 #define BIMODAL_LOG_SIZE   	14	// 2^14 entries in base predictor
-#define TAGEPRED_CTR_MAX	7	// 3bit counter (following paper); 000 ... 111
-#define TAGEPRED_CTR_INIT	0	// TODO: Check paper
+#define TAGEPRED_CTR_MAX	7	// 3bit counter (as per paper); 000 ... 111
+#define TAGEPRED_CTR_INIT	4	// TODO: Check paper
 #define TAGEPRED_LOG_SIZE	12	// 2^12 entries in tage table
 
-#define ALT_BETTER_COUNT_MAX	15 // 4bit counter for the max number of times that the alternate predictor was better
+#define ALT_BETTER_COUNT_MAX	15 			// 4bit counter for the max number of times that the alternate predictor was better
+#define CLOCK_RESET_PERIOD		256*1024	// Useful bit resets after 256K branches (as per paper)
 
-// Entry in a TAGE compoenent
+// Entry in a TAGE component
 struct TagEntry {
     INT32 ctr;	// 3bit predictor
     UINT32 tag;	// Unique tag
@@ -56,14 +57,14 @@ private:
 	UINT32  *bimodal;			// Pattern history table (pht)
 	UINT32  numBimodalEntries;	// Total entries in pht 
 	
-	//Tagged Predictors
+	// Tagged Predictors
 	TagEntry *tagePred[NUM_TAGE_TABLES];	// TAGE tables; T[4]
 	UINT32 geometric[NUM_TAGE_TABLES];		// Geometric history length of T[i]
 	UINT32 numTagPredEntries;				// Total entries in TAGE table
 	UINT32 tageIndex[NUM_TAGE_TABLES];		// Calculated index for T[i]
 	UINT32 tag[NUM_TAGE_TABLES];			// Calculated tag for that index in T[i]
 	
-	//Compressed Buffers
+	// Compressed Buffers
 	CompressedHist indexComp[NUM_TAGE_TABLES];
 	CompressedHist tagComp[2][NUM_TAGE_TABLES]; 
 
@@ -115,7 +116,7 @@ public:
 		geometric[2] = 15;
 		geometric[3] = 5;
 
-		// Initialize compressed buffers for tage components 
+		// Initialize compressed buffers for TAGE components 
 		for(int i = 0; i < NUM_TAGE_TABLES; i++) {
 			indexComp[i].geomLength = geometric[i];
 			indexComp[i].targetLength = TAGEPRED_LOG_SIZE;
@@ -282,8 +283,6 @@ public:
 				if ((u->direction_prediction () != taken) && (providerComp > 0)) {		
 					for (int i = 0; i < providerComp; i++) {
 						// Find at least one entry that is not useful
-
-						// TODO: might need to follow the original, read paper here
 						if (tagePred[i][tageIndex[i]].u == 0)
 							strong_old_present = true;
 					}
@@ -339,7 +338,7 @@ public:
 			clock++;
         
 			// Every 256K instruction, clear MSB and then LSB
-			if (clock == (256*1024)) {
+			if (clock == CLOCK_RESET_PERIOD) {
             	// Reset clock
             	clock = 0;
 
@@ -358,7 +357,7 @@ public:
 				}
 			}
 	
-			// Update GHR
+			// Append the branch result to the GHR
 			GHR = (GHR << 1);
 			if (taken)
 				GHR.set(0, 1); 
@@ -369,8 +368,7 @@ public:
 				tagComp[1][i].updateCompHist(GHR);
 			}
   
-  			// PHR update is simple, jus take the last bit
-    		// Always Limited to 16 bits as per paper.
+  			// Append the LSB of the address to the PHR
 			PHR = (PHR << 1);
 
 			if (bi.address & 1)
