@@ -1,4 +1,4 @@
-//Predictor 1- gshare
+// Predictor 1: gshare
 
 class my_update : public branch_update {
 public:
