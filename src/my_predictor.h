@@ -1,4 +1,9 @@
 #include "tage.h"
+#include "loop_predictor.h"
+#include <iostream>
+#include <fstream>
+
+std::ofstream outFile("output.txt");
 
 class my_update : public branch_update {
     public:
@@ -8,16 +13,41 @@ class my_update : public branch_update {
     class my_predictor : public branch_predictor {
     public:
         tage_predictor tage;
-        branch_update* u;
+        loop_predictor loop;
+        
+        branch_update* tage_pred;
+        branch_update* loop_pred;
+        
+        int loop_correct;
     
-        my_predictor (void) {}
+        my_predictor (void): loop_correct(0) {}
+
+        void update_ctr (bool taken) {
+            if (taken == loop_pred->direction_prediction()) {
+                if (loop_correct < 127) 
+                    loop_correct++;
+            }
+            else if (loop_correct > -126) 
+                loop_correct--;
+        }
     
         branch_update *predict (branch_info & b) {
-            u = tage.predict(b);
-            return u;
+            tage_pred = tage.predict(b);
+            loop_pred = loop.predict(b);
+
+            if (loop.is_valid && loop_correct >= 0) {
+                outFile << "loop prediction" << std::endl;
+                return loop_pred;
+            }
+                
+            outFile << "tage prediction" << std::endl;
+            return tage_pred;
         }
     
         void update (branch_update *u, bool taken, unsigned int target) {
             tage.update(u, taken, target);
+            loop.update(u, taken, target, tage_pred->direction_prediction());
+            if (loop.is_valid && tage_pred != loop_pred) 
+                update_ctr(taken);
         }
     };
