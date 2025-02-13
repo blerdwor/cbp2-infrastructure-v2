@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <fstream>
 
 #define TAKEN		true
 #define NOT_TAKEN	false
@@ -13,8 +14,8 @@
 #define LOGWAY          2   // Number of bits required to determine the way at an index
 #define TAGSIZE         14  // Number of bits to represent tag in the table
 #define ITERSIZE        14  // Max size of the loop that the predictor can predict properly
-#define AGE             255  // Initial age of the entry
-#define CONFIDENCE_MAX  4   // Recognize a branch as a loop after 3 successful executions
+#define AGE             31  // Initial age of the entry, good middle ground
+#define CONFIDENCE_MAX  3   // Recognize a branch as a loop after 3 successful executions
 #define NO_HIT          -1  // A symbol for not finding a hit
 
 struct LoopEntry {
@@ -40,14 +41,18 @@ public:
     bool is_valid;  // Validity of prediction
     bool loop_pred; // The prediction returned for current PC
 
+    void reset_loop_entry (LoopEntry &entry) {
+        entry.tag = 0;
+        entry.past_iter = 0;
+        entry.current_iter = 0;
+        entry.age = 0;
+        entry.confidence = 0;
+    }
+
     loop_predictor (void) {
         seed = 0;
         for (int i = 0; i < ENTRIES; i++) {
-            table[i].tag = 0;
-            table[i].past_iter = 0;
-            table[i].current_iter = 0;
-            table[i].age = 0;
-            table[i].confidence = 0;
+            reset_loop_entry(table[i]);
         }
     }
 
@@ -58,7 +63,8 @@ public:
         u.target_prediction (0);
 
         // Try to find a matching entry
-        for (int i = ind; i < ind + WAY; i++) {        
+        for (int i = ind; i < ind + WAY; i++) {
+            
             if (table[i].tag == tag) {
                 hit = i;
                 is_valid = (table[i].confidence == CONFIDENCE_MAX);  // Only want high confidence
@@ -93,14 +99,10 @@ void loop_predictor::update (branch_update *u, bool taken, unsigned int target, 
         if (is_valid) {
             // If the predicton was wrong, free the entry
             if (taken != loop_pred) {
-                entry.current_iter = 0;
-                entry.past_iter = 0;
-                entry.confidence = 0;
-                entry.age = 0;
+                reset_loop_entry(entry);
                 return;
             }
 
-            // TODO check why age is only 31
             // If TAGE is wrong and the entry was valid, then age it
             if (taken != tage_pred && entry.age < AGE)
                 entry.age++;
@@ -108,40 +110,32 @@ void loop_predictor::update (branch_update *u, bool taken, unsigned int target, 
         
         entry.current_iter++;
         entry.current_iter &= ((1 << ITERSIZE) - 1);
-
+        
         // If the iteration is greater than what was seen last time, free the entry
         if (entry.current_iter > entry.past_iter)
         {
             entry.confidence = 0;
-            if (entry.past_iter != 0) {
-                entry.current_iter = 0;
-                entry.past_iter = 0;
-                entry.age = 0;
-            }
+
+            if (entry.past_iter != 0)
+                reset_loop_entry(entry);
         }
 
         if (!taken) {
             if (entry.current_iter == entry.past_iter) {
                 // Increase the confidence if correct
-                if (entry.confidence < 3)
+                if (entry.confidence < CONFIDENCE_MAX)
                     entry.confidence++;
                 
                 // We do not care for loops with < 3 iterations
-                if (entry.past_iter > 0 && entry.past_iter < 3) {
-                    entry.past_iter = 0;
-                    entry.age = 0;
-                    entry.confidence = 0;
-                }
+                if (entry.past_iter > 0 && entry.past_iter < 3)
+                    reset_loop_entry(entry);
             } else {
                 // Set the newly allocated entry
                 if (entry.past_iter == 0) {
                     entry.confidence = 0;
                     entry.past_iter = entry.current_iter;
-                } else { // else free the entry
-                    entry.past_iter = 0;
-                    entry.age = 0;
-                    entry.confidence = 0;
-                }
+                } else// else free the entry
+                    reset_loop_entry(entry);
             }
             entry.current_iter = 0;
         }

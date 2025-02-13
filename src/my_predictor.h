@@ -3,8 +3,6 @@
 #include <iostream>
 #include <fstream>
 
-std::ofstream outFile("output.txt");
-
 class my_update : public branch_update {
     public:
         unsigned int index;
@@ -36,11 +34,9 @@ class my_update : public branch_update {
             loop_pred = loop.predict(b);
 
             if (loop.is_valid && loop_correct >= 0) {
-                outFile << "loop prediction" << std::endl;
                 return loop_pred;
             }
                 
-            outFile << "tage prediction" << std::endl;
             return tage_pred;
         }
     
