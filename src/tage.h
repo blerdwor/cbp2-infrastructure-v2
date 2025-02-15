@@ -56,8 +56,8 @@ private:
 	int PHR;				// 16bit path history
 	
 	// Bimodal Base Predictor
-	UINT32  *bimodal;			// Pattern history table (pht)
-	UINT32  numBimodalEntries;	// Total entries in pht 
+	UINT32 *bimodal;			// Pattern history table (pht)
+	UINT32 numBimodalEntries;	// Total entries in pht 
 	
 	// Tagged Predictors
 	TagEntry *tagePred[NUM_TAGE_TABLES];	// TAGE tables; T[4]

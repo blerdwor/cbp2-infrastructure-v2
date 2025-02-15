@@ -1,3 +1,5 @@
+// Predictor 2: Loop Predictor
+
 #include <cstdint>
 #include <fstream>
 
@@ -88,74 +90,71 @@ public:
         return &u;
     }
 
-    void update (branch_update *u, bool taken, unsigned int target, bool tage_pred);
-};
-
-// Updates the predictor table based on the prediction and actually taken/not taken branch
-void loop_predictor::update (branch_update *u, bool taken, unsigned int target, bool tage_pred) {
-    if (hit > NO_HIT) {
-        LoopEntry &entry = table[hit];
-
-        if (is_valid) {
-            // If the predicton was wrong, free the entry
-            if (taken != loop_pred) {
-                reset_loop_entry(entry);
-                return;
-            }
-
-            // If TAGE is wrong and the entry was valid, then age it
-            if (taken != tage_pred && entry.age < AGE)
-                entry.age++;
-        }
-        
-        entry.current_iter++;
-        entry.current_iter &= ((1 << ITERSIZE) - 1);
-        
-        // If the iteration is greater than what was seen last time, free the entry
-        if (entry.current_iter > entry.past_iter)
-        {
-            entry.confidence = 0;
-
-            if (entry.past_iter != 0)
-                reset_loop_entry(entry);
-        }
-
-        if (!taken) {
-            if (entry.current_iter == entry.past_iter) {
-                // Increase the confidence if correct
-                if (entry.confidence < CONFIDENCE_MAX)
-                    entry.confidence++;
-                
-                // We do not care for loops with < 3 iterations
-                if (entry.past_iter > 0 && entry.past_iter < 3)
+    void update (branch_update *u, bool taken, unsigned int target, bool tage_pred) {
+        if (hit > NO_HIT) {
+            LoopEntry &entry = table[hit];
+    
+            if (is_valid) {
+                // If the predicton was wrong, free the entry
+                if (taken != loop_pred) {
                     reset_loop_entry(entry);
-            } else {
-                // Set the newly allocated entry
-                if (entry.past_iter == 0) {
-                    entry.confidence = 0;
-                    entry.past_iter = entry.current_iter;
-                } else// else free the entry
+                    return;
+                }
+    
+                // If TAGE is wrong and the entry was valid, then age it
+                if (taken != tage_pred && entry.age < AGE)
+                    entry.age++;
+            }
+            
+            entry.current_iter++;
+            entry.current_iter &= ((1 << ITERSIZE) - 1);
+            
+            // If the iteration is greater than what was seen last time, free the entry
+            if (entry.current_iter > entry.past_iter)
+            {
+                entry.confidence = 0;
+    
+                if (entry.past_iter != 0)
                     reset_loop_entry(entry);
             }
-            entry.current_iter = 0;
-        }
-    } else if (taken) {
-        // If the branch is taken but there is no entry, we must allocate one entry in the table
-        seed = (seed + 1) & 3;
-
-        for (int i = 0; i < WAY; i++) {
-            int j = ind + ((seed + i) & 3);
-
-            if (table[j].age == 0) {
-                table[j].tag = tag;
-                table[j].past_iter = 0;
-                table[j].current_iter = 1;
-                table[j].age = AGE;
-                table[j].confidence = 0;
-                break;
+    
+            if (!taken) {
+                if (entry.current_iter == entry.past_iter) {
+                    // Increase the confidence if correct
+                    if (entry.confidence < CONFIDENCE_MAX)
+                        entry.confidence++;
+                    
+                    // We do not care for loops with < 3 iterations
+                    if (entry.past_iter > 0 && entry.past_iter < 3)
+                        reset_loop_entry(entry);
+                } else {
+                    // Set the newly allocated entry
+                    if (entry.past_iter == 0) {
+                        entry.confidence = 0;
+                        entry.past_iter = entry.current_iter;
+                    } else// else free the entry
+                        reset_loop_entry(entry);
+                }
+                entry.current_iter = 0;
             }
-            else if (table[j].age > 0)
-                table[j].age--;
+        } else if (taken) {
+            // If the branch is taken but there is no entry, we must allocate one entry in the table
+            seed = (seed + 1) & 3;
+    
+            for (int i = 0; i < WAY; i++) {
+                int j = ind + ((seed + i) & 3);
+    
+                if (table[j].age == 0) {
+                    table[j].tag = tag;
+                    table[j].past_iter = 0;
+                    table[j].current_iter = 1;
+                    table[j].age = AGE;
+                    table[j].confidence = 0;
+                    break;
+                }
+                else if (table[j].age > 0)
+                    table[j].age--;
+            }
         }
     }
-}
+};
