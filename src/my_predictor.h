@@ -6,7 +6,7 @@
 
 #include <fstream>
 
-std::ofstream out("a.txt");
+// std::ofstream out("a.txt");
 
 class my_update : public branch_update {
     public:
@@ -39,16 +39,14 @@ public:
     branch_update *predict (branch_info & b) {
         tage_pred = tage.predict(b);
         // loop_pred = loop.predict(b);
-        ittage_pred = tage.predict(b);
+        ittage_pred = ittage.predict(b);
 
-        // if (loop.is_valid && loop_correct >= 0) {
-        //     return loop_pred;
-        // }
+        // // if (loop.is_valid && loop_correct >= 0) {
+        // //     return loop_pred;
+        // // }
 
-        if (b.br_flags & BR_INDIRECT) {
-            out << "Indirect\n";
+        if (b.br_flags & BR_INDIRECT)
             return ittage_pred;
-        } 
         else
             return tage_pred;
     }

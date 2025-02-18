@@ -18,9 +18,9 @@ std::ofstream outFile("output.txt");
 #define BIMODAL_CTR_MAX		3	// 2bit counter (as per paper); 00 ... 11;  
 #define BIMODAL_CTR_INIT	2	// TODO: Check paper
 #define BIMODAL_LOG_SIZE   	14	// 2^14 entries in base predictor
-#define TAGEPRED_CTR_MAX	7	// 3bit counter (as per paper); 000 ... 111
-#define TAGEPRED_CTR_INIT	4	// TODO: Check paper
-#define TAGEPRED_LOG_SIZE	12	// 2^12 entries in tage table
+#define ittagePred_CTR_MAX	7	// 3bit counter (as per paper); 000 ... 111
+#define ittagePred_CTR_INIT	4	// TODO: Check paper
+#define ITTAGE_PRED_LOG_SIZE	12	// 2^12 entries in tage table
 
 #define ALT_BETTER_COUNT_MAX	15 			// 4bit counter for the max number of times that the alternate predictor was better
 #define CLOCK_RESET_PERIOD		256*1024	// Useful bit resets after 256K branches (as per paper)
@@ -44,10 +44,10 @@ private:
 	UINT32 numBimodalEntries;	// Total entries in pht 
 	
 	// Tagged Predictors
-	IttageEntry *tagePred[NUM_TAGE_TABLES];	// TAGE tables; T[4]
+	IttageEntry *ittagePred[NUM_TAGE_TABLES];	// ITTAGE tables; T[4]
 	UINT32 geometric[NUM_TAGE_TABLES];		// Geometric history length of T[i]
 	UINT32 numTagPredEntries;				// Total entries in TAGE table
-	UINT32 tageIndex[NUM_TAGE_TABLES];		// Calculated index for T[i]
+	UINT32 ittageIndex[NUM_TAGE_TABLES];		// Calculated index for T[i]
 	UINT32 tag[NUM_TAGE_TABLES];			// Calculated tag for that index in T[i]
 	
 	// Compressed Buffers
@@ -79,21 +79,21 @@ public:
             bimodal[i] = 0;  // No target stored initially
         
         // Initialize tagged predictors 
-        numTagPredEntries = (1 << TAGEPRED_LOG_SIZE);
+        numTagPredEntries = (1 << ITTAGE_PRED_LOG_SIZE);
     
         for(UINT32 i = 0; i < NUM_TAGE_TABLES; i++) {
-            tagePred[i] = new IttageEntry[numTagPredEntries];
+            ittagePred[i] = new IttageEntry[numTagPredEntries];
     
             for(UINT32 j = 0; j < numTagPredEntries; j++) {
-                tagePred[i][j].target = 0;  // No target stored initially
-                tagePred[i][j].tag = 0;     
-                tagePred[i][j].u = 0;       // Confidence starts at 0
-                tagePred[i][j].c = 0;       // Useful bit starts at 0
+                ittagePred[i][j].target = 0; 
+                ittagePred[i][j].tag = 0;     
+                ittagePred[i][j].u = 0;
+                ittagePred[i][j].c = 0;
             }
         }
     
         for(int i = 0; i < NUM_TAGE_TABLES; i++) {
-            tageIndex[i] = 0;
+            ittageIndex[i] = 0;
             tag[i] = 0;
         }
     
@@ -106,7 +106,7 @@ public:
         // Initialize compressed buffers for TAGE components 
         for(int i = 0; i < NUM_TAGE_TABLES; i++) {
             indexComp[i].geomLength = geometric[i];
-            indexComp[i].targetLength = TAGEPRED_LOG_SIZE;
+            indexComp[i].targetLength = ITTAGE_PRED_LOG_SIZE;
             indexComp[i].compHist = 0;
         }
     
@@ -135,135 +135,178 @@ public:
 
 	branch_update *predict (branch_info & b) {
         bi = b;
-        if (b.br_flags & BR_INDIRECT) {
-            // Base prediction: fetch the target from the bimodal table
+        if (b.br_flags & BR_INDIRECT) { // TODO: REMOVE LATER
+
+            // Base prediction
             UINT32 bimodalIndex = b.address % numBimodalEntries;
             unsigned int baseTarget = bimodal[bimodalIndex];
     
-            // Hashing to generate tag values for each table
+            // Hash to generate tag values for each table
             for (int i = 0; i < NUM_TAGE_TABLES; i++) {
                 tag[i] = b.address ^ tagComp[0][i].compHist ^ (tagComp[1][i].compHist << 1);
                 tag[i] &= ((1 << 9) - 1);
             }
     
-            // Compute indices for each TAGE table
-            tageIndex[0] = b.address ^ (b.address >> TAGEPRED_LOG_SIZE) ^ indexComp[0].compHist ^ PHR ^ (PHR >> TAGEPRED_LOG_SIZE);
-            tageIndex[1] = b.address ^ (b.address >> (TAGEPRED_LOG_SIZE - 1)) ^ indexComp[1].compHist ^ (PHR);
-            tageIndex[2] = b.address ^ (b.address >> (TAGEPRED_LOG_SIZE - 2)) ^ indexComp[2].compHist ^ (PHR & 31);
-            tageIndex[3] = b.address ^ (b.address >> (TAGEPRED_LOG_SIZE - 3)) ^ indexComp[3].compHist ^ (PHR & 7);
+            // Get the index for each table
+            ittageIndex[0] = b.address ^ (b.address >> ITTAGE_PRED_LOG_SIZE) ^ indexComp[0].compHist ^ PHR ^ (PHR >> ITTAGE_PRED_LOG_SIZE);
+            ittageIndex[1] = b.address ^ (b.address >> (ITTAGE_PRED_LOG_SIZE - 1)) ^ indexComp[1].compHist ^ (PHR);
+            ittageIndex[2] = b.address ^ (b.address >> (ITTAGE_PRED_LOG_SIZE - 2)) ^ indexComp[2].compHist ^ (PHR & 31);
+            ittageIndex[3] = b.address ^ (b.address >> (ITTAGE_PRED_LOG_SIZE - 3)) ^ indexComp[3].compHist ^ (PHR & 7);
     
-            UINT32 index_mask = ((1 << TAGEPRED_LOG_SIZE) - 1);
+            UINT32 index_mask = ((1 << ITTAGE_PRED_LOG_SIZE) - 1);
             for (int i = 0; i < NUM_TAGE_TABLES; i++)
-                tageIndex[i] &= index_mask;
+                ittageIndex[i] &= index_mask;
     
             // Search for provider and alternate predictor
+            providerPred = -1;
+			altPred = -1;
             providerComp = NUM_TAGE_TABLES;
             altComp = NUM_TAGE_TABLES;
+            
+            // See if the tags match for the provider component; T0 would be best
             for (int i = 0; i < NUM_TAGE_TABLES; i++) {
-                if (tagePred[i][tageIndex[i]].tag == tag[i]) {
-                    outFile << "HIT\n";
+                if (ittagePred[i][ittageIndex[i]].tag == tag[i]) {
+                    // outFile << "provider tag " << tag[i] << std::endl;
                     providerComp = i;
                     break;
                 }
             }
+
+            // See if the tags match for alternate predictor
             for (int i = providerComp + 1; i < NUM_TAGE_TABLES; i++) {
-                if (tagePred[i][tageIndex[i]].tag == tag[i]) {
-                    outFile << "ALT HIT\n";
+                if (ittagePred[i][ittageIndex[i]].tag == tag[i]) {
+                    // outFile << "altpred tag " << tag[i] << std::endl;
                     altComp = i;
                     break;
                 }
             }
     
-            // Get the alternate target prediction
-            if (altComp == NUM_TAGE_TABLES)
-                altPred = baseTarget; // No alternate component found
-            else
-                altPred = tagePred[altComp][tageIndex[altComp]].target;
-    
             // Determine final prediction using confidence
             if (providerComp < NUM_TAGE_TABLES) { // Found provider component
-                providerPred = tagePred[providerComp][tageIndex[providerComp]].target;
-                INT32 confidence = tagePred[providerComp][tageIndex[providerComp]].c;
-    
-                if (confidence > 1 || altBetterCount < 8)
-                    u.target_prediction(providerPred); // Use provider target
+                
+                if (altComp == NUM_TAGE_TABLES)
+                    altPred = baseTarget; // No alternate component found
                 else
+                    altPred = ittagePred[altComp][ittageIndex[altComp]].target;
+
+                
+                INT32 confidence = ittagePred[providerComp][ittageIndex[providerComp]].c;
+    
+                if (confidence > 1 || altBetterCount <= ALT_BETTER_COUNT_MAX/2) {
+                    // outFile << "provider prediction\n";
+                    providerPred = ittagePred[providerComp][ittageIndex[providerComp]].target;
+                    u.target_prediction(providerPred); // Use provider target
+                }
+                else {
+                    // outFile << "altpred prediction\n";
                     u.target_prediction(altPred); // Use alternate target
-            } else // No provider component found
+                }
+            } else { // No provider component found
+                // outFile << "base prediction " << bimodalIndex << " " << baseTarget << std::endl;
                 u.target_prediction(baseTarget); // Default to bimodal target
+            }
         } else
-            u.target_prediction(0); // Default for non-conditional branches
+            u.target_prediction(0); // Other non-indirect branches
     
         return &u;
     }
 
 	void update (branch_update *u, bool taken, unsigned int target) {
         if (bi.br_flags & BR_INDIRECT) {
+            bool strong_old_present = false;
 
-            bool new_entry = false;
+            if (u->target_prediction() == target)
+				outFile << "correct" << std::endl;
+			else
+				outFile << "misprediction" << std::endl;
             
             // First, check if the provider table correctly predicted the target
             if (providerComp < NUM_TAGE_TABLES) {
+
+                // If the provider prediction != alt prediction, increment useful ctr on a correct prediction, decrement otherwise
+				if (u->target_prediction () != altPred) {
+					if (u->target_prediction () == target)
+						ittagePred[providerComp][ittageIndex[providerComp]].u = satIncrement(ittagePred[providerComp][ittageIndex[providerComp]].u, static_cast<UINT32>(BIMODAL_CTR_MAX));
+					else
+						ittagePred[providerComp][ittageIndex[providerComp]].u = satDecrement(ittagePred[providerComp][ittageIndex[providerComp]].u);
+				}
+
                 // If prediction was incorrect, update the stored target
                 if (u->target_prediction() != target) {
-                    outFile << "Incorrect\n";
-                    tagePred[providerComp][tageIndex[providerComp]].target = target;
-                    satDecrement(tagePred[providerComp][tageIndex[providerComp]].c);
-                } else {
-                    satIncrement(tagePred[providerComp][tageIndex[providerComp]].c, BIMODAL_CTR_MAX);
-                    outFile << "Correct\n";
-                }
+                    satDecrement(ittagePred[providerComp][ittageIndex[providerComp]].c);
+
+                    if (ittagePred[providerComp][ittageIndex[providerComp]].c == 0)
+                        ittagePred[providerComp][ittageIndex[providerComp]].target = target;    
+                } else
+                    satIncrement(ittagePred[providerComp][ittageIndex[providerComp]].c, BIMODAL_CTR_MAX);
             } else {
                 // Provider component not found; update base predictor (bimodal table)
-                outFile << "Bimodal correct\n";
                 UINT32 bimodalIndex = bi.address % numBimodalEntries;
                 bimodal[bimodalIndex] = target;
             }
+
+            // Was the alternate prediction better?
+            // TODO: think about this
+			if (providerComp < NUM_TAGE_TABLES && ittagePred[providerComp][ittageIndex[providerComp]].u == 0) {					
+                // Alternate prediction is more useful
+                if (providerPred != altPred) {
+                    if (altPred == target && altBetterCount < ALT_BETTER_COUNT_MAX)		
+                        altBetterCount++;
+                } else if (altBetterCount > 0)
+                    altBetterCount--;
+            }
     
             // Allocate new entry if:
-            // There was no provider entry OR the provider prediction was incorrect
-            if (providerComp == NUM_TAGE_TABLES || u->target_prediction() != target)
-                new_entry = true;
-    
-            if (new_entry) {
-                bool strong_old_present = false;
-                
+            // There was no provider entry OR the provider prediction was incorrect    
+            if (u->target_prediction() != target) {
+
                 // Look for an unused entry in smaller history tables
                 if (providerComp > 0) {
                     for (int i = 0; i < providerComp; i++) {
-                        if (tagePred[i][tageIndex[i]].u == 0)
+                        if (ittagePred[i][ittageIndex[i]].u == 0) {
                             strong_old_present = true;
+                            break;
+                        }
                     }
     
                     if (!strong_old_present) {
-                        // All entries are useful; decrement usefulness counters to make room
+                        // All entries are useful; decrease useful bits for all and do not allocate
                         for (int i = providerComp - 1; i >= 0; i--)
-                            tagePred[i][tageIndex[i]].u = satDecrement(tagePred[i][tageIndex[i]].u);
+                            ittagePred[i][ittageIndex[i]].u = satDecrement(ittagePred[i][ittageIndex[i]].u);
                     } else {
-                        // Choose a random bank to allocate from among the useless entries
                         srand(time(NULL));
                         int randNo = rand() % 100;
                         int count = 0;
                         int bank_store[NUM_TAGE_TABLES - 1] = {-1, -1, -1};
                         int matchBank = 0;
     
-                        for (int i = 0; i < providerComp; i++) {
-                            if (tagePred[i][tageIndex[i]].u == 0)
-                                bank_store[count++] = i;
-                        }
+                        // Count the number of components with a useless entry at the calculated index
+						for (int i = 0; i < providerComp; i++) {
+							if (ittagePred[i][ittageIndex[i]].u == 0) {
+								count++;
+								bank_store[i] = i;
+							}
+						} 
     
                         if (count == 1)
                             matchBank = bank_store[0];
                         else if (count > 1) {
-                            matchBank = (randNo > 33) ? bank_store[count - 1] : bank_store[count - 2];
+                            // More than one useless bank; choose one randomly with 2/3 preference for the component with longer history
+                            if (randNo > 33 && randNo <= 99)
+                                matchBank = bank_store[(count-1)];
+                            else
+                                matchBank = bank_store[(count-2)];
                         }
     
                         // Allocate an entry in the chosen bank
                         for (int i = matchBank; i >= 0; i--) {
-                            if (tagePred[i][tageIndex[i]].u == 0) {
-                                tagePred[i][tageIndex[i]].target = target; // Store the new target
-                                tagePred[i][tageIndex[i]].tag = tag[i];    // Store the new tag
-                                tagePred[i][tageIndex[i]].u = 0;
+                            if (ittagePred[i][ittageIndex[i]].u == 0) {
+                                // outFile << "allocating!" << std::endl;
+                                // outFile << i << " " << ittageIndex[i] << " " << tag[i] << std::endl; 
+                                ittagePred[i][ittageIndex[i]].target = target; // Store the new target
+                                ittagePred[i][ittageIndex[i]].tag = tag[i];    // Store the new tag
+                                ittagePred[i][ittageIndex[i]].c = 1;
+                                ittagePred[i][ittageIndex[i]].u = 0;
                                 break;
                             }
                         }
@@ -281,12 +324,12 @@ public:
                 if (clock_flip) { // Reset MSB
                     for (int j = 0; j < NUM_TAGE_TABLES; j++) {
                         for (UINT32 i = 0; i < numTagPredEntries; i++)
-                            tagePred[j][i].u &= 1;
+                            ittagePred[j][i].u &= 1;
                     }
                 } else { // Reset LSB
                     for (int j = 0; j < NUM_TAGE_TABLES; j++) {
                         for (UINT32 i = 0; i < numTagPredEntries; i++)
-                            tagePred[j][i].u &= 2;
+                            ittagePred[j][i].u &= 2;
                     }
                 }
             }

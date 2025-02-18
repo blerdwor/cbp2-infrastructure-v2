@@ -19,7 +19,7 @@
 
 int main (int argc, char *argv[]) {
 
-	// std::ofstream logfile("logfile.txt", std::ios::app);
+	std::ofstream logfile("logfile.txt", std::ios::app);
 
 	// make sure there is one parameter
 	if (argc != 2) {
@@ -39,7 +39,11 @@ int main (int argc, char *argv[]) {
 
 	long long int 
 		tmiss = 0, 	// number of target mispredictions
-		dmiss = 0; 	// number of direction mispredictions
+		dmiss = 0, 	// number of direction mispredictions
+		total_misses = 0; // number of combined misprediction
+
+	long long int total_conditional = 0;
+	long long int total_indirect = 0;
 
 	// keep looping until end of file
 
@@ -60,18 +64,27 @@ int main (int argc, char *argv[]) {
 		// collect statistics for a conditional branch trace
 
 		if (t->bi.br_flags & BR_CONDITIONAL) {
+			
+			// logfile << (u->direction_prediction () == t->taken) << std::endl;
 
 			// count a direction misprediction
+			total_conditional++;
 
 			dmiss += u->direction_prediction () != t->taken;
-
-			// count a target misprediction
-
-			tmiss += u->target_prediction () != t->target;
 
 			// if (logfile.is_open()) {
 			// 	logfile << t->bi.address << " " << t->taken << " " << u->direction_prediction () << "\n";
 			// }
+		}
+
+		// collect statistics for an indirect branch trace
+
+		if (t->bi.br_flags & BR_INDIRECT) {
+			// logfile << (u->target_prediction () == t->target) << std::endl;
+			// count a target misprediction
+			total_indirect++;
+
+			tmiss += u->target_prediction () != t->target;
 		}
 
 		// update competitor's state
@@ -85,10 +98,18 @@ int main (int argc, char *argv[]) {
 
 	end_trace ();
 
+	total_misses = dmiss + tmiss;
+
+	logfile << "dmiss: " << dmiss << " " << total_conditional << std::endl;
+	logfile << "tmiss: " << tmiss << " " << total_indirect << std::endl;
+	logfile << "total miss: " << total_misses << std::endl << std::endl;
+
 	// give final mispredictions per kilo-instruction and exit.
 	// each trace represents exactly 100 million instructions.
 
-	printf ("%0.3f MPKI\n", 1000.0 * (dmiss / 1e8));
+	printf ("%0.3f MPKI\n", 1000.0 * (total_misses / 1e8));
+	// printf ("%0.3f MPKI\n", 1000.0 * (tmiss / 1e8));
+	// printf ("%0.3f MPKI\n", 1000.0 * (total_misses / 1e8));
 	delete p;
 	exit (0);
 }

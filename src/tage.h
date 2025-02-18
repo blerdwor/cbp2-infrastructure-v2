@@ -4,6 +4,10 @@
 #include <bitset>
 #include <algorithm>
 
+#include <fstream>
+
+std::ofstream out("out.txt");
+
 #define INT32	int32_t
 #define UINT32	uint32_t
 
@@ -151,6 +155,7 @@ public:
 	branch_update *predict (branch_info & b) {
 		bi = b;
 		if (b.br_flags & BR_CONDITIONAL) {
+
 			// Base prediction
 			bool basePrediction;
 			UINT32 bimodalIndex = b.address % numBimodalEntries;
@@ -197,14 +202,15 @@ public:
                     break;
                 }  
             }
-			
-			if (providerComp < NUM_TAGE_TABLES) {	/* Provider component found */
+
+			if (providerComp < NUM_TAGE_TABLES) {	// Found provider component
+
 				if(altComp == NUM_TAGE_TABLES)
 					altPred = basePrediction;	// Alternate component not found; use base predictor
 				else
 					altPred = (tagePred[altComp][tageIndex[altComp]].ctr >= TAGEPRED_CTR_MAX/2) ? TAKEN : NOT_TAKEN;	// Alt component found
-        
-				// Use provider prediction
+			
+				
 				if ((tagePred[providerComp][tageIndex[providerComp]].ctr != 3) || 
 					(tagePred[providerComp][tageIndex[providerComp]].ctr != 4 ) || 
 					(tagePred[providerComp][tageIndex[providerComp]].u != 0) || 
@@ -229,7 +235,12 @@ public:
 	void update (branch_update *u, bool taken, unsigned int target) {
 		if (bi.br_flags & BR_CONDITIONAL) {
 			bool strong_old_present = false;
-			bool new_entry = 0;
+			bool new_entry = false;
+
+			// if (u->direction_prediction() == taken)
+			// 	out << "correct" << std::endl;
+			// else
+			// 	out << "misprediction" << std::endl;
 
 			// First update the counters of the appropriate predictor
 			if (providerComp < NUM_TAGE_TABLES) {
@@ -282,15 +293,17 @@ public:
 			if((!new_entry) || (new_entry && (providerPred != taken))) {
 
 				// Misprediction; didn't use T0
-				if ((u->direction_prediction () != taken) && (providerComp > 0)) {		
+				if (u->direction_prediction () != taken && providerComp > 0) {		
 					for (int i = 0; i < providerComp; i++) {
 						// Find at least one entry that is not useful
-						if (tagePred[i][tageIndex[i]].u == 0)
+						if (tagePred[i][tageIndex[i]].u == 0) {
 							strong_old_present = true;
+							break;
+						}
 					}
 			
-					if (strong_old_present == false) {
-						// If all entries are useful, than decrease useful bits for all and do not allocate
+					if (!strong_old_present) {
+						// All entries are useful; decrease useful bits for all and do not allocate
 						for (int i = providerComp - 1; i >= 0; i--)
 							tagePred[i][tageIndex[i]].u = satDecrement(tagePred[i][tageIndex[i]].u);
 					} else {
@@ -305,28 +318,25 @@ public:
 							if (tagePred[i][tageIndex[i]].u == 0) {
 								count++;
 								bank_store[i] = i;
+								// out << "bank_store " << i << std::endl;
 							}
 						} 
 
-						// Only one useless component
 						if(count == 1)
 							matchBank = bank_store[0];
-						else if(count > 1) {
+						else if (count > 1) {
 							// More than one useless bank; choose one randomly with 2/3 preference for the component with longer history
-							if(randNo > 33 && randNo <= 99)
+							if (randNo > 33 && randNo <= 99)
 								matchBank = bank_store[(count-1)];
 							else
 								matchBank = bank_store[(count-2)];
 						}
 
-						// Allocate one entry; start at the matched component and go to longer histories
+						// Allocate one entry; start at the matched component and go to shorter histories
 						for (int i = matchBank; i > -1; i--) {
-							if ((tagePred[i][tageIndex[i]].u == 0)) {
-								if(taken)   
-									tagePred[i][tageIndex[i]].ctr = 4;
-								else
-									tagePred[i][tageIndex[i]].ctr = 3;
-	
+							// out << i << " " << tageIndex[i] << " " << tag[i] << std::endl;
+							if ((tagePred[i][tageIndex[i]].u == 0)) { 
+								tagePred[i][tageIndex[i]].ctr = taken ? 4 : 3;	
 								tagePred[i][tageIndex[i]].tag = tag[i];
 								tagePred[i][tageIndex[i]].u = 0;
 								break;
