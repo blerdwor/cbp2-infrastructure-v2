@@ -68,6 +68,8 @@
         "type_traits": "cpp",
         "utility": "cpp",
         "numbers": "cpp",
-        "cinttypes": "cpp"
+        "cinttypes": "cpp",
+        "iterator": "cpp",
+        "numeric": "cpp"
     }
 }

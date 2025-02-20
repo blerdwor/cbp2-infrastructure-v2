@@ -4,10 +4,6 @@
 #include <bitset>
 #include <algorithm>
 
-#include <fstream>
-
-std::ofstream out("out.txt");
-
 #define INT32	int32_t
 #define UINT32	uint32_t
 
@@ -237,11 +233,6 @@ public:
 			bool strong_old_present = false;
 			bool new_entry = false;
 
-			// if (u->direction_prediction() == taken)
-			// 	out << "correct" << std::endl;
-			// else
-			// 	out << "misprediction" << std::endl;
-
 			// First update the counters of the appropriate predictor
 			if (providerComp < NUM_TAGE_TABLES) {
 				/* Provider component found previously */
@@ -318,7 +309,6 @@ public:
 							if (tagePred[i][tageIndex[i]].u == 0) {
 								count++;
 								bank_store[i] = i;
-								// out << "bank_store " << i << std::endl;
 							}
 						} 
 
@@ -334,7 +324,6 @@ public:
 
 						// Allocate one entry; start at the matched component and go to shorter histories
 						for (int i = matchBank; i > -1; i--) {
-							// out << i << " " << tageIndex[i] << " " << tag[i] << std::endl;
 							if ((tagePred[i][tageIndex[i]].u == 0)) { 
 								tagePred[i][tageIndex[i]].ctr = taken ? 4 : 3;	
 								tagePred[i][tageIndex[i]].tag = tag[i];

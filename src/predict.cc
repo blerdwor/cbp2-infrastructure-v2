@@ -17,9 +17,9 @@
 #include "predictor.h"
 #include "my_predictor.h"
 
-int main (int argc, char *argv[]) {
+std::ofstream logfile("output.txt", std::ios::app);
 
-	std::ofstream logfile("logfile.txt", std::ios::app);
+int main (int argc, char *argv[]) {	
 
 	// make sure there is one parameter
 	if (argc != 2) {
@@ -40,7 +40,8 @@ int main (int argc, char *argv[]) {
 	long long int 
 		tmiss = 0, 	// number of target mispredictions
 		dmiss = 0, 	// number of direction mispredictions
-		total_misses = 0; // number of combined misprediction
+		total_misses = 0, // number of combined misprediction
+		total_branches = 0;
 
 	long long int total_conditional = 0;
 	long long int total_indirect = 0;
@@ -62,6 +63,10 @@ int main (int argc, char *argv[]) {
 		branch_update *u = p->predict (t->bi);
 
 		// collect statistics for a conditional branch trace
+
+		total_branches++;
+
+		// compare to gshare mispredictions for dmiss and tmiss
 
 		if (t->bi.br_flags & BR_CONDITIONAL) {
 			
@@ -102,6 +107,7 @@ int main (int argc, char *argv[]) {
 
 	logfile << "dmiss: " << dmiss << " " << total_conditional << std::endl;
 	logfile << "tmiss: " << tmiss << " " << total_indirect << std::endl;
+	logfile << "total branches: " << total_branches << std::endl;
 	logfile << "total miss: " << total_misses << std::endl << std::endl;
 
 	// give final mispredictions per kilo-instruction and exit.

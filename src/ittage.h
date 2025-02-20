@@ -4,10 +4,6 @@
 #include <bitset>
 #include <algorithm>
 
-#include <fstream>
-
-std::ofstream outFile("output.txt");
-
 #define INT32	int32_t
 #define UINT32	uint32_t
 
@@ -166,7 +162,6 @@ public:
             // See if the tags match for the provider component; T0 would be best
             for (int i = 0; i < NUM_TAGE_TABLES; i++) {
                 if (ittagePred[i][ittageIndex[i]].tag == tag[i]) {
-                    // outFile << "provider tag " << tag[i] << std::endl;
                     providerComp = i;
                     break;
                 }
@@ -175,7 +170,6 @@ public:
             // See if the tags match for alternate predictor
             for (int i = providerComp + 1; i < NUM_TAGE_TABLES; i++) {
                 if (ittagePred[i][ittageIndex[i]].tag == tag[i]) {
-                    // outFile << "altpred tag " << tag[i] << std::endl;
                     altComp = i;
                     break;
                 }
@@ -193,18 +187,13 @@ public:
                 INT32 confidence = ittagePred[providerComp][ittageIndex[providerComp]].c;
     
                 if (confidence > 1 || altBetterCount <= ALT_BETTER_COUNT_MAX/2) {
-                    // outFile << "provider prediction\n";
                     providerPred = ittagePred[providerComp][ittageIndex[providerComp]].target;
                     u.target_prediction(providerPred); // Use provider target
                 }
-                else {
-                    // outFile << "altpred prediction\n";
+                else
                     u.target_prediction(altPred); // Use alternate target
-                }
-            } else { // No provider component found
-                // outFile << "base prediction " << bimodalIndex << " " << baseTarget << std::endl;
+            } else // No provider component found
                 u.target_prediction(baseTarget); // Default to bimodal target
-            }
         } else
             u.target_prediction(0); // Other non-indirect branches
     
@@ -214,11 +203,6 @@ public:
 	void update (branch_update *u, bool taken, unsigned int target) {
         if (bi.br_flags & BR_INDIRECT) {
             bool strong_old_present = false;
-
-            if (u->target_prediction() == target)
-				outFile << "correct" << std::endl;
-			else
-				outFile << "misprediction" << std::endl;
             
             // First, check if the provider table correctly predicted the target
             if (providerComp < NUM_TAGE_TABLES) {
@@ -301,8 +285,6 @@ public:
                         // Allocate an entry in the chosen bank
                         for (int i = matchBank; i >= 0; i--) {
                             if (ittagePred[i][ittageIndex[i]].u == 0) {
-                                // outFile << "allocating!" << std::endl;
-                                // outFile << i << " " << ittageIndex[i] << " " << tag[i] << std::endl; 
                                 ittagePred[i][ittageIndex[i]].target = target; // Store the new target
                                 ittagePred[i][ittageIndex[i]].tag = tag[i];    // Store the new tag
                                 ittagePred[i][ittageIndex[i]].c = 1;

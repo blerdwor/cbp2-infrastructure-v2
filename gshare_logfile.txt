@@ -1,0 +1,100 @@
+dmiss: 1223267 15114596
+tmiss: 20305 20305
+total branches: 18299698
+total miss: 1243572
+
+dmiss: 1150442 12827221
+tmiss: 20244 20244
+total branches: 15349702
+total miss: 1170686
+
+dmiss: 778092 17083242
+tmiss: 61465 61465
+total branches: 22296960
+total miss: 839557
+
+dmiss: 1348918 21700420
+tmiss: 20240 20240
+total branches: 23794267
+total miss: 1369158
+
+dmiss: 372425 8927032
+tmiss: 20267 20267
+total branches: 12329043
+total miss: 392692
+
+dmiss: 843355 14190746
+tmiss: 20729 20729
+total branches: 18473298
+total miss: 864084
+
+dmiss: 766960 11764885
+tmiss: 32532 32532
+total branches: 14581367
+total miss: 799492
+
+dmiss: 123067 14154055
+tmiss: 145842 145842
+total branches: 21175988
+total miss: 268909
+
+dmiss: 245538 12201864
+tmiss: 461312 461312
+total branches: 23833770
+total miss: 706850
+
+dmiss: 355351 13191770
+tmiss: 347248 347248
+total branches: 19347133
+total miss: 702599
+
+dmiss: 193713 12986593
+tmiss: 97572 97572
+total branches: 15427534
+total miss: 291285
+
+dmiss: 187668 13021205
+tmiss: 90945 90945
+total branches: 15371661
+total miss: 278613
+
+dmiss: 243528 12512685
+tmiss: 418725 418725
+total branches: 23837761
+total miss: 662253
+
+dmiss: 237135 11926271
+tmiss: 395449 395449
+total branches: 20477910
+total miss: 632584
+
+dmiss: 150579 7724960
+tmiss: 476051 476051
+total branches: 11225403
+total miss: 626630
+
+dmiss: 174462 13537118
+tmiss: 20278 20278
+total branches: 20085076
+total miss: 194740
+
+dmiss: 356015 13838041
+tmiss: 26270 26270
+total branches: 19762650
+total miss: 382285
+
+dmiss: 82620 11073761
+tmiss: 21025 21025
+total branches: 16640406
+total miss: 103645
+
+dmiss: 7663 24586276
+tmiss: 20219 20219
+total branches: 24747762
+total miss: 27882
+
+dmiss: 1740804 13098893
+tmiss: 20321 20321
+total branches: 15192852
+total miss: 1761125
+
