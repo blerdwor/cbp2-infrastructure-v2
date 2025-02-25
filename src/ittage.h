@@ -32,7 +32,7 @@ struct IttageEntry {
 class ittage_predictor : public branch_predictor {
 private:
 	// Histories
-	std::bitset<131> GHR;	// Global history register
+	std::bitset<256> GHR;	// Global history register
 	int PHR;				// 16bit path history
 	
 	// Bimodal Base Predictor
@@ -47,8 +47,8 @@ private:
 	UINT32 tag[NUM_TAGE_TABLES];			// Calculated tag for that index in T[i]
 	
 	// Compressed Buffers
-	CompressedHist indexComp[NUM_TAGE_TABLES];
-	CompressedHist tagComp[2][NUM_TAGE_TABLES]; 
+	FoldedHist indexComp[NUM_TAGE_TABLES];
+	FoldedHist tagComp[2][NUM_TAGE_TABLES]; 
 
 	// Predictions
 	unsigned int providerPred;  // Prediction of the provider component

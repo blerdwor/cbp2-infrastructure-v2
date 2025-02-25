@@ -37,18 +37,18 @@ public:
     // }
 
     branch_update *predict (branch_info & b) {
-        tage_pred = ittage.predict(b);
+        tage_pred = tage.predict(b);
         // loop_pred = loop.predict(b);
-        ittage_pred = tage.predict(b);
+        ittage_pred = ittage.predict(b);
 
         // // if (loop.is_valid && loop_correct >= 0) {
         // //     return loop_pred;
         // // }
 
         if (b.br_flags & BR_INDIRECT)
-            return ittage.predict(b);
+            return ittage_pred;
         else
-            return tage.predict(b);
+            return tage_pred;
     }
 
     void update (branch_update *u, bool taken, unsigned int target) {

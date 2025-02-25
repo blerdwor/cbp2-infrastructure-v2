@@ -17,7 +17,7 @@
 #include "predictor.h"
 #include "my_predictor.h"
 
-std::ofstream logfile("output.txt", std::ios::app);
+// std::ofstream logfile("output.txt", std::ios::app);
 
 int main (int argc, char *argv[]) {	
 
@@ -105,15 +105,15 @@ int main (int argc, char *argv[]) {
 
 	total_misses = dmiss + tmiss;
 
-	logfile << "dmiss: " << dmiss << " " << total_conditional << std::endl;
-	logfile << "tmiss: " << tmiss << " " << total_indirect << std::endl;
-	logfile << "total branches: " << total_branches << std::endl;
-	logfile << "total miss: " << total_misses << std::endl << std::endl;
+	// logfile << "dmiss: " << dmiss << " " << total_conditional << std::endl;
+	// logfile << "tmiss: " << tmiss << " " << total_indirect << std::endl;
+	// logfile << "total branches: " << total_branches << std::endl;
+	// logfile << "total miss: " << total_misses << std::endl << std::endl;
 
 	// give final mispredictions per kilo-instruction and exit.
 	// each trace represents exactly 100 million instructions.
 
-	printf ("%0.3f MPKI\n", 1000.0 * (total_misses / 1e8));
+	printf ("%0.3f MPKI\n", 1000.0 * (dmiss / 1e8));
 	// printf ("%0.3f MPKI\n", 1000.0 * (tmiss / 1e8));
 	// printf ("%0.3f MPKI\n", 1000.0 * (total_misses / 1e8));
 	delete p;

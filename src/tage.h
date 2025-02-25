@@ -10,15 +10,16 @@
 #define TAKEN		true
 #define NOT_TAKEN	false
 
-#define NUM_TAGE_TABLES 	4	// Total number of TAGE components (tables)
 #define BIMODAL_CTR_MAX		3	// 2bit counter (as per paper); 00 ... 11;  
-#define BIMODAL_CTR_INIT	2	// TODO: Check paper
+#define BIMODAL_CTR_INIT	2	// Initialize to weakly taken
 #define BIMODAL_LOG_SIZE   	14	// 2^14 entries in base predictor
-#define TAGEPRED_CTR_MAX	7	// 3bit counter (as per paper); 000 ... 111
-#define TAGEPRED_CTR_INIT	4	// TODO: Check paper
-#define TAGEPRED_LOG_SIZE	12	// 2^12 entries in tage table
 
-#define ALT_BETTER_COUNT_MAX	15 			// 4bit counter for the max number of times that the alternate predictor was better
+#define NUM_TAGE_TABLES 	4	// Total number of TAGE components (tables)
+#define TAGEPRED_CTR_MAX	7	// 3bit counter (as per paper); 000 ... 111
+#define TAGEPRED_CTR_INIT	4	// Initialize to weakly taken
+#define TAGEPRED_LOG_SIZE	12	// 2^12 entries in a TAGE component
+
+#define ALT_BETTER_COUNT_MAX	15 			// 4bit counter
 #define CLOCK_RESET_PERIOD		256*1024	// Useful bit resets after 256K branches (as per paper)
 
 // Entry in a TAGE component
@@ -28,13 +29,13 @@ struct TagEntry {
     INT32 u;	// 2bit useful counter
 };
 
-// Folded history implementation; GHR(geometric length) -> Compressed(target)
-struct CompressedHist {
+// Folded history compression; GHR(geometric length) -> Compressed(target)
+struct FoldedHist {
     UINT32 geomLength;		// Geometric history length
     UINT32 targetLength;	// Cropped size
     UINT32 compHist;		// Compressed history
       
-    void updateCompHist(std::bitset<131> ghr) {
+    void updateCompHist(std::bitset<256> ghr) {
         int mask = (1 << targetLength) - 1;
         int mask1 = ghr[geomLength] << (geomLength % targetLength);
         int mask2 = (1 << targetLength);
@@ -52,8 +53,8 @@ int satDecrement(UINT32 value) { return (value > 0) ? value - 1 : value; }
 class tage_predictor : public branch_predictor {
 private:
 	// Histories
-	std::bitset<131> GHR;	// Global history register
-	int PHR;				// 16bit path history
+	std::bitset<256> GHR;	// Global history register
+	int PHR;				// 16bit path history register
 	
 	// Bimodal Base Predictor
 	UINT32 *bimodal;			// Pattern history table (pht)
@@ -61,14 +62,13 @@ private:
 	
 	// Tagged Predictors
 	TagEntry *tagePred[NUM_TAGE_TABLES];	// TAGE tables; T[4]
-	UINT32 geometric[NUM_TAGE_TABLES];		// Geometric history length of T[i]
 	UINT32 numTagPredEntries;				// Total entries in TAGE table
-	UINT32 tageIndex[NUM_TAGE_TABLES];		// Calculated index for T[i]
+	UINT32 index[NUM_TAGE_TABLES];			// Calculated index for T[i]
 	UINT32 tag[NUM_TAGE_TABLES];			// Calculated tag for that index in T[i]
 	
 	// Compressed Buffers
-	CompressedHist indexComp[NUM_TAGE_TABLES];
-	CompressedHist tagComp[2][NUM_TAGE_TABLES]; 
+	FoldedHist indexComp[NUM_TAGE_TABLES];
+	FoldedHist tagComp[2][NUM_TAGE_TABLES]; 
 
 	// Predictions
 	bool providerPred;		// Prediction of the provider component
@@ -107,18 +107,17 @@ public:
 			}
 		}
 
+		// Initialize stored indices and tags
 		for(int i=0; i < NUM_TAGE_TABLES; i++) {
-			tageIndex[i] = 0;
+			index[i] = 0;
 			tag[i] = 0;
 		}
 
+		// { 130, 44, 15, 5 }
 		// Geometric lengths of history, T0 is longest
-		geometric[0] = 130;
-		geometric[1] = 44;
-		geometric[2] = 15;
-		geometric[3] = 5;
+		UINT32 geometric[4] = { 81, 27, 9, 3 };
 
-		// Initialize compressed buffers for TAGE components 
+		// Initialize compressed buffers for indices 
 		for(int i = 0; i < NUM_TAGE_TABLES; i++) {
 			indexComp[i].geomLength = geometric[i];
 			indexComp[i].targetLength = TAGEPRED_LOG_SIZE;
@@ -126,11 +125,11 @@ public:
 		}
 
 		// Initialize compressed buffers for tags
-        // T0/T1 have tag length of 9; T2/T3 have tag length of 8
+        // From PPM paper, tagComp[0] has 8bits and tagComp[1] has 7 bits
         for(int j = 0; j < 2 ; j++) {
         	for(int i = 0; i < NUM_TAGE_TABLES; i++) {
 				tagComp[j][i].geomLength = geometric[i];
-				tagComp[j][i].targetLength = (j == 0) ? 9 : 8;
+				tagComp[j][i].targetLength = (j == 0) ? 8 : 7;
 				tagComp[j][i].compHist = 0;
         	}   
     	}
@@ -159,65 +158,62 @@ public:
 
 			basePrediction = (bimodalCounter > BIMODAL_CTR_MAX/2) ? TAKEN : NOT_TAKEN;
 
-			// Hash to get tag includes info about bank, pc and global history compressed
-			// formula given in PPM paper 
-			// pc[9:0] xor CSR1 xor (CSR2 << 1)
+			// Compute tag according to PPM paper: pc[9:0] ⊕ CSR1 ⊕ (CSR2 << 1)
 			for (int i = 0; i < NUM_TAGE_TABLES; i++) {
 				tag[i] = b.address ^ tagComp[0][i].compHist ^ (tagComp[1][i].compHist << 1);
 				tag[i] &= ((1 << 9) - 1);
 			}
 			
-			// Get the index for each table
-			tageIndex[0] = b.address ^ (b.address >> TAGEPRED_LOG_SIZE) ^ indexComp[0].compHist ^ PHR ^ (PHR >> TAGEPRED_LOG_SIZE);
-       		tageIndex[1] = b.address ^ (b.address >> (TAGEPRED_LOG_SIZE - 1)) ^ indexComp[1].compHist ^ (PHR);
-       		tageIndex[2] = b.address ^ (b.address >> (TAGEPRED_LOG_SIZE - 2)) ^ indexComp[2].compHist ^ (PHR & 31);
-       		tageIndex[3] = b.address ^ (b.address >> (TAGEPRED_LOG_SIZE - 3)) ^ indexComp[3].compHist ^ (PHR & 7);
+			// Compute index for each table according to PPM paper: pc[9:0] ⊕ pc[19:10] ⊕ ghist ⊕ phist
+			index[0] = b.address ^ (b.address >> TAGEPRED_LOG_SIZE) ^ indexComp[0].compHist ^ PHR ^ (PHR >> TAGEPRED_LOG_SIZE);
+       		index[1] = b.address ^ (b.address >> TAGEPRED_LOG_SIZE) ^ indexComp[1].compHist ^ (PHR);
+       		index[2] = b.address ^ (b.address >> TAGEPRED_LOG_SIZE) ^ indexComp[2].compHist ^ (PHR & 31);
+       		index[3] = b.address ^ (b.address >> TAGEPRED_LOG_SIZE) ^ indexComp[3].compHist ^ (PHR & 7);
 			
 			UINT32 index_mask = ((1 << TAGEPRED_LOG_SIZE) - 1);
 			for(int i = 0; i < NUM_TAGE_TABLES; i++)
-            	tageIndex[i] &= index_mask;
+            	index[i] &= index_mask;
 			
-			// Get the provider and alternate predictions
+			// Set the provider and alternate predictions
 			providerPred = -1;
 			altPred = -1;
 			providerComp = NUM_TAGE_TABLES;
 			altComp = NUM_TAGE_TABLES;
 
-			// See if the tags match for the provider component; T0 would be best
+			// See if any tags match for the provider component; T0 would be best
 			for(int i = 0; i < NUM_TAGE_TABLES; i++) {
-            	if(tagePred[i][tageIndex[i]].tag == tag[i]) {
+            	if(tagePred[i][index[i]].tag == tag[i]) {
 					providerComp = i;
 					break;
 				}  
        		}      
             
-			// See if the tags match for alternate predictor
+			// See if any tags match for alternate predictor
 			for(int i = providerComp + 1; i < NUM_TAGE_TABLES; i++) {
-                if (tagePred[i][tageIndex[i]].tag == tag[i]) {
+                if (tagePred[i][index[i]].tag == tag[i]) {
                     altComp = i;
                     break;
                 }  
             }
 
-			if (providerComp < NUM_TAGE_TABLES) {	// Found provider component
+			if (providerComp < NUM_TAGE_TABLES) {	// Provider component found
 
 				if(altComp == NUM_TAGE_TABLES)
-					altPred = basePrediction;	// Alternate component not found; use base predictor
+					altPred = basePrediction;	// Alt pred not found; use base predictor
 				else
-					altPred = (tagePred[altComp][tageIndex[altComp]].ctr >= TAGEPRED_CTR_MAX/2) ? TAKEN : NOT_TAKEN;	// Alt component found
+					altPred = (tagePred[altComp][index[altComp]].ctr >= TAGEPRED_CTR_MAX/2) ? TAKEN : NOT_TAKEN;	// Alt pred found
 			
-				
-				if ((tagePred[providerComp][tageIndex[providerComp]].ctr != 3) || 
-					(tagePred[providerComp][tageIndex[providerComp]].ctr != 4 ) || 
-					(tagePred[providerComp][tageIndex[providerComp]].u != 0) || 
+				// Use provider component if it wasn't newly allocated and is useful
+				if ((tagePred[providerComp][index[providerComp]].ctr != 3) || 
+					(tagePred[providerComp][index[providerComp]].ctr != 4 ) || 
+					(tagePred[providerComp][index[providerComp]].u != 0) || 
 					(altBetterCount <= ALT_BETTER_COUNT_MAX/2)) { 
-						providerPred = (tagePred[providerComp][tageIndex[providerComp]].ctr >= TAGEPRED_CTR_MAX/2) ? TAKEN : NOT_TAKEN;
+						providerPred = (tagePred[providerComp][index[providerComp]].ctr >= TAGEPRED_CTR_MAX/2) ? TAKEN : NOT_TAKEN;
 						u.direction_prediction(providerPred);
-				}
-				else	// Use alternate prediction
+				} else
 					u.direction_prediction(altPred);
 
-			} else {	/* Provider component not found */
+			} else {	// Provider component not found
 				altPred = basePrediction;
 				u.direction_prediction(altPred);
 			}
@@ -230,29 +226,25 @@ public:
 
 	void update (branch_update *u, bool taken, unsigned int target) {
 		if (bi.br_flags & BR_CONDITIONAL) {
-			bool strong_old_present = false;
-			bool new_entry = false;
+			bool useless_entries_found = false;
+			bool allocate = false;
 
-			// First update the counters of the appropriate predictor
+			// First, update the provider component's useful bit and prediction counter
 			if (providerComp < NUM_TAGE_TABLES) {
-				/* Provider component found previously */
 
-				// If the provider prediction != alt prediction, increment useful ctr on a correct prediction, decrement otherwise
 				if (u->direction_prediction () != altPred) {
 					if (u->direction_prediction () == taken)
-						tagePred[providerComp][tageIndex[providerComp]].u = satIncrement(tagePred[providerComp][tageIndex[providerComp]].u, static_cast<UINT32>(BIMODAL_CTR_MAX));
+						tagePred[providerComp][index[providerComp]].u = satIncrement(tagePred[providerComp][index[providerComp]].u, static_cast<UINT32>(BIMODAL_CTR_MAX));
 					else
-						tagePred[providerComp][tageIndex[providerComp]].u = satDecrement(tagePred[providerComp][tageIndex[providerComp]].u);
+						tagePred[providerComp][index[providerComp]].u = satDecrement(tagePred[providerComp][index[providerComp]].u);
 				}
 
-				// Then update the provider component ctr  
 				if (taken)
-					tagePred[providerComp][tageIndex[providerComp]].ctr = satIncrement(tagePred[providerComp][tageIndex[providerComp]].ctr, static_cast<UINT32>(TAGEPRED_CTR_MAX));
+					tagePred[providerComp][index[providerComp]].ctr = satIncrement(tagePred[providerComp][index[providerComp]].ctr, static_cast<UINT32>(TAGEPRED_CTR_MAX));
 				else
-					tagePred[providerComp][tageIndex[providerComp]].ctr = satDecrement(tagePred[providerComp][tageIndex[providerComp]].ctr);
+					tagePred[providerComp][index[providerComp]].ctr = satDecrement(tagePred[providerComp][index[providerComp]].ctr);
 
-			} else {
-				/* Provider component not found previously; used base predictor */
+			} else {	// Update the base predictor's counter
 				UINT32 bimodalIndex = bi.address % numBimodalEntries;
 				if (taken)
 					bimodal[bimodalIndex] = satIncrement(bimodal[bimodalIndex], static_cast<UINT32>(BIMODAL_CTR_MAX));
@@ -260,18 +252,16 @@ public:
 					bimodal[bimodalIndex] = satDecrement(bimodal[bimodalIndex]);
 			}
 
-			// Is current entry that gave the prediction a newly allocated entry?
+			// Was the current entry that gave the prediction useful?
 			if (providerComp < NUM_TAGE_TABLES) {
-				/* Provider component found previously */
 
-				// Provider predictor was not useful, and was weakly not taken / weakly taken
-				if ((tagePred[providerComp][tageIndex[providerComp]].u == 0) && 
-					((tagePred[providerComp][tageIndex[providerComp]].ctr == 3) || 
-					 (tagePred[providerComp][tageIndex[providerComp]].ctr == 4))) {
+				if ((tagePred[providerComp][index[providerComp]].u == 0) && 
+					((tagePred[providerComp][index[providerComp]].ctr == 3) || 
+					 (tagePred[providerComp][index[providerComp]].ctr == 4))) {
 												
-					new_entry = true;
+					allocate = true;
 					
-					// Alternate prediction is more useful
+					// Alternate prediction might be more useful
 					if (providerPred != altPred) {
 						if (altPred == taken && altBetterCount < ALT_BETTER_COUNT_MAX)		
 							altBetterCount++;
@@ -280,23 +270,23 @@ public:
 				}
 			}
 
-			// Allocate a new entry if we haven't already or the provider prediction was wrong
-			if((!new_entry) || (new_entry && (providerPred != taken))) {
+			// Allocate a new entry if necessary or the provider component mispredicted
+			if((!allocate) || (allocate && (providerPred != taken))) {
 
-				// Misprediction; didn't use T0
+				// Misprediction
 				if (u->direction_prediction () != taken && providerComp > 0) {		
 					for (int i = 0; i < providerComp; i++) {
 						// Find at least one entry that is not useful
-						if (tagePred[i][tageIndex[i]].u == 0) {
-							strong_old_present = true;
+						if (tagePred[i][index[i]].u == 0) {
+							useless_entries_found = true;
 							break;
 						}
 					}
-			
-					if (!strong_old_present) {
-						// All entries are useful; decrease useful bits for all and do not allocate
+					
+					// All entries useful; decrease useful bits for all and do not allocate
+					if (!useless_entries_found) {
 						for (int i = providerComp - 1; i >= 0; i--)
-							tagePred[i][tageIndex[i]].u = satDecrement(tagePred[i][tageIndex[i]].u);
+							tagePred[i][index[i]].u = satDecrement(tagePred[i][index[i]].u);
 					} else {
 						srand(time(NULL));
 						int randNo = rand() % 100;
@@ -304,9 +294,9 @@ public:
 						int bank_store[NUM_TAGE_TABLES - 1] = {-1, -1, -1};
 						int matchBank = 0;
 
-						// Count the number of components with a useless entry at the calculated index
+						// Count number of components with a useless entry
 						for (int i = 0; i < providerComp; i++) {
-							if (tagePred[i][tageIndex[i]].u == 0) {
+							if (tagePred[i][index[i]].u == 0) {
 								count++;
 								bank_store[i] = i;
 							}
@@ -315,19 +305,19 @@ public:
 						if(count == 1)
 							matchBank = bank_store[0];
 						else if (count > 1) {
-							// More than one useless bank; choose one randomly with 2/3 preference for the component with longer history
+							// More than one useless bank; choose one randomly with 2/3 preference for component with longer history
 							if (randNo > 33 && randNo <= 99)
 								matchBank = bank_store[(count-1)];
 							else
 								matchBank = bank_store[(count-2)];
 						}
 
-						// Allocate one entry; start at the matched component and go to shorter histories
+						// Allocate one entry
 						for (int i = matchBank; i > -1; i--) {
-							if ((tagePred[i][tageIndex[i]].u == 0)) { 
-								tagePred[i][tageIndex[i]].ctr = taken ? 4 : 3;	
-								tagePred[i][tageIndex[i]].tag = tag[i];
-								tagePred[i][tageIndex[i]].u = 0;
+							if ((tagePred[i][index[i]].u == 0)) { 
+								tagePred[i][index[i]].ctr = taken ? 4 : 3;	
+								tagePred[i][index[i]].tag = tag[i];
+								tagePred[i][index[i]].u = 0;
 								break;
 							}
 						}
@@ -335,14 +325,12 @@ public:
 				}
     		}  
 
-			// Periodic useful bit reset (important for optimizing over PPM paper)
+			// Periodic useful bit reset (optimizes over PPM paper)
 			clock++;
         
 			// Every 256K instruction, clear MSB and then LSB
 			if (clock == CLOCK_RESET_PERIOD) {
-            	// Reset clock
             	clock = 0;
-
 				clock_flip = (clock_flip == 1) ? 0 : 1;
 
 				if (clock_flip == 1) { // MSB turn
