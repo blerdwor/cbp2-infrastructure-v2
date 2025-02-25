@@ -1,10 +1,8 @@
+#include <iostream>
+#include <fstream>
 #include "tage.h"
 #include "loop_predictor.h"
 #include "ittage.h"
-#include <iostream>
-#include <fstream>
-
-#include <fstream>
 
 // std::ofstream out("a.txt");
 

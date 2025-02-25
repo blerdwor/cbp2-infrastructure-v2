@@ -3,12 +3,7 @@
 #include <cstdint>
 #include <bitset>
 #include <algorithm>
-
-#define INT32	int32_t
-#define UINT32	uint32_t
-
-#define TAKEN		true
-#define NOT_TAKEN	false
+#include "tools.h"
 
 #define BIMODAL_CTR_MAX		3	// 2bit counter (as per paper); 00 ... 11;  
 #define BIMODAL_CTR_INIT	2	// Initialize to weakly taken
@@ -17,33 +12,14 @@
 #define NUM_TAGE_TABLES 	4	// Total number of TAGE components (tables)
 #define TAGEPRED_CTR_MAX	7	// 3bit counter (as per paper); 000 ... 111
 #define TAGEPRED_CTR_INIT	4	// Initialize to weakly taken
-#define TAGEPRED_LOG_SIZE	12	// 2^12 entries in a TAGE component
-
-#define ALT_BETTER_COUNT_MAX	15 			// 4bit counter
-#define CLOCK_RESET_PERIOD		256*1024	// Useful bit resets after 256K branches (as per paper)
+#define TAGE_COMP_LOG_SIZE	12	// 2^12 entries in a TAGE component
+#define U_CTR_MAX			3	// 2bit counter (as per paper); 00 ... 11; 
 
 // Entry in a TAGE component
 struct TagEntry {
     INT32 ctr;	// 3bit predictor
     UINT32 tag;	// Unique tag
     INT32 u;	// 2bit useful counter
-};
-
-// Folded history compression; GHR(geometric length) -> Compressed(target)
-struct FoldedHist {
-    UINT32 geomLength;		// Geometric history length
-    UINT32 targetLength;	// Cropped size
-    UINT32 compHist;		// Compressed history
-      
-    void updateCompHist(std::bitset<256> ghr) {
-        int mask = (1 << targetLength) - 1;
-        int mask1 = ghr[geomLength] << (geomLength % targetLength);
-        int mask2 = (1 << targetLength);
-		compHist  = (compHist << 1) + ghr[0];
-		compHist ^= ((compHist & mask2) >> targetLength);
-		compHist ^= mask1;
-		compHist &= mask;     
-    }    
 };
 
 int satIncrement(UINT32 value, UINT32 max) { return (value < max) ? value + 1 : value; }
@@ -53,8 +29,8 @@ int satDecrement(UINT32 value) { return (value > 0) ? value - 1 : value; }
 class tage_predictor : public branch_predictor {
 private:
 	// Histories
-	std::bitset<256> GHR;	// Global history register
-	int PHR;				// 16bit path history register
+	std::bitset<GHIST_SIZE> GHR;	// Global history register
+	int PHR;						// 16bit path history register
 	
 	// Bimodal Base Predictor
 	UINT32 *bimodal;			// Pattern history table (pht)
@@ -95,7 +71,7 @@ public:
 			bimodal[i] = BIMODAL_CTR_INIT;
 		
 		// Initialize tagged predictors 
-		numTagPredEntries = (1 << TAGEPRED_LOG_SIZE);
+		numTagPredEntries = (1 << TAGE_COMP_LOG_SIZE);
 
 		for(UINT32 i = 0; i < NUM_TAGE_TABLES; i++) {
 			tagePred[i] = new TagEntry[numTagPredEntries];
@@ -113,14 +89,13 @@ public:
 			tag[i] = 0;
 		}
 
-		// { 130, 44, 15, 5 }
 		// Geometric lengths of history, T0 is longest
-		UINT32 geometric[4] = { 81, 27, 9, 3 };
+		UINT32 geometric[NUM_TAGE_TABLES] = { 128, 32, 8, 2};
 
 		// Initialize compressed buffers for indices 
 		for(int i = 0; i < NUM_TAGE_TABLES; i++) {
 			indexComp[i].geomLength = geometric[i];
-			indexComp[i].targetLength = TAGEPRED_LOG_SIZE;
+			indexComp[i].targetLength = TAGE_COMP_LOG_SIZE;
 			indexComp[i].compHist = 0;
 		}
 
@@ -165,12 +140,12 @@ public:
 			}
 			
 			// Compute index for each table according to PPM paper: pc[9:0] ⊕ pc[19:10] ⊕ ghist ⊕ phist
-			index[0] = b.address ^ (b.address >> TAGEPRED_LOG_SIZE) ^ indexComp[0].compHist ^ PHR ^ (PHR >> TAGEPRED_LOG_SIZE);
-       		index[1] = b.address ^ (b.address >> TAGEPRED_LOG_SIZE) ^ indexComp[1].compHist ^ (PHR);
-       		index[2] = b.address ^ (b.address >> TAGEPRED_LOG_SIZE) ^ indexComp[2].compHist ^ (PHR & 31);
-       		index[3] = b.address ^ (b.address >> TAGEPRED_LOG_SIZE) ^ indexComp[3].compHist ^ (PHR & 7);
+			index[0] = b.address ^ (b.address >> TAGE_COMP_LOG_SIZE) ^ indexComp[0].compHist ^ PHR ^ (PHR >> TAGE_COMP_LOG_SIZE);
+       		index[1] = b.address ^ (b.address >> TAGE_COMP_LOG_SIZE) ^ indexComp[1].compHist ^ (PHR);
+       		index[2] = b.address ^ (b.address >> TAGE_COMP_LOG_SIZE) ^ indexComp[2].compHist ^ (PHR & 31);
+       		index[3] = b.address ^ (b.address >> TAGE_COMP_LOG_SIZE) ^ indexComp[3].compHist ^ (PHR & 7);
 			
-			UINT32 index_mask = ((1 << TAGEPRED_LOG_SIZE) - 1);
+			UINT32 index_mask = ((1 << TAGE_COMP_LOG_SIZE) - 1);
 			for(int i = 0; i < NUM_TAGE_TABLES; i++)
             	index[i] &= index_mask;
 			
@@ -234,7 +209,7 @@ public:
 
 				if (u->direction_prediction () != altPred) {
 					if (u->direction_prediction () == taken)
-						tagePred[providerComp][index[providerComp]].u = satIncrement(tagePred[providerComp][index[providerComp]].u, static_cast<UINT32>(BIMODAL_CTR_MAX));
+						tagePred[providerComp][index[providerComp]].u = satIncrement(tagePred[providerComp][index[providerComp]].u, static_cast<UINT32>(U_CTR_MAX));
 					else
 						tagePred[providerComp][index[providerComp]].u = satDecrement(tagePred[providerComp][index[providerComp]].u);
 				}
@@ -346,7 +321,7 @@ public:
 				}
 			}
 	
-			// Append the branch result to the GHR
+			// Append the branch result to GHR
 			GHR = (GHR << 1);
 			if (taken)
 				GHR.set(0, 1); 
@@ -357,7 +332,7 @@ public:
 				tagComp[1][i].updateCompHist(GHR);
 			}
   
-  			// Append the LSB of the address to the PHR
+  			// Append the LSB of the address to PHR
 			PHR = (PHR << 1);
 
 			if (bi.address & 1)
